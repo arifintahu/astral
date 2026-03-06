@@ -63,7 +63,7 @@
 
       const opts: uPlot.Options = {
           width: chartContainer.clientWidth,
-          height: 280,
+          height: chartContainer.clientHeight,
           padding: [16, 8, 0, 0],
           cursor: {
               show: true,
@@ -138,14 +138,16 @@
       interval = setInterval(fetchData, 60000);
 
       const resizeObserver = new ResizeObserver(() => {
-          if (chart) {
+          if (chart && chartContainer) {
               chart.setSize({
                   width: chartContainer.clientWidth,
-                  height: 280
+                  height: chartContainer.clientHeight
               });
           }
       });
-      resizeObserver.observe(chartContainer);
+      if (chartContainer) {
+          resizeObserver.observe(chartContainer);
+      }
 
       return () => {
           clearInterval(interval);
@@ -155,42 +157,31 @@
   });
 </script>
 
-<div class="glass-panel p-6">
-    <div class="mb-5 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3">
-        <h3 class="metric-label">History</h3>
-
-        <div class="flex bg-white/[0.03] rounded-xl p-1 border border-white/[0.05]">
-            {#each windows as w}
-                <button
-                    class="px-3.5 py-1.5 text-[11px] font-semibold rounded-lg transition-all duration-200 cursor-pointer
-                           {window === w.id
-                             ? 'bg-white/[0.08] text-white shadow-sm'
-                             : 'text-slate-500 hover:text-slate-300'}"
-                    onclick={() => setWindow(w.id)}
-                >
-                    {w.label}
-                </button>
-            {/each}
-        </div>
+<div class="glass-panel p-6 h-full flex flex-col">
+  <div class="flex justify-between items-center mb-6 flex-shrink-0">
+    <h3 class="metric-label">History</h3>
+    <div class="flex bg-white/[0.03] rounded-xl p-1 border border-white/[0.05]">
+      {#each windows as w}
+        <button
+          class="px-3 py-1 text-[11px] font-semibold rounded-lg transition-all duration-200 cursor-pointer
+                 {window === w.id ? 'bg-white/[0.08] text-white shadow-sm' : 'text-slate-500 hover:text-slate-300'}"
+          onclick={() => setWindow(w.id)}
+        >{w.label}</button>
+      {/each}
     </div>
+  </div>
 
-    <div class="relative min-h-[280px]">
-        {#if isLoading && !chart}
-            <div class="absolute inset-0 flex items-center justify-center">
-                <div class="flex items-center gap-3">
-                    <div class="w-4 h-4 border-2 border-slate-700 border-t-cyan-500 rounded-full animate-spin"></div>
-                    <span class="text-sm text-slate-500">Loading history...</span>
-                </div>
-            </div>
-        {:else if !hasData && !isLoading}
-            <div class="absolute inset-0 flex flex-col items-center justify-center gap-2">
-                <svg class="w-8 h-8 text-slate-700" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
-                </svg>
-                <span class="text-sm text-slate-600">No historical data yet</span>
-                <span class="text-[11px] text-slate-700">Data will appear after a few minutes</span>
-            </div>
-        {/if}
-        <div bind:this={chartContainer} class="w-full text-slate-300"></div>
-    </div>
+  <div class="flex-1 min-h-0 relative">
+    <div bind:this={chartContainer} class="absolute inset-0"></div>
+    {#if !hasData && !isLoading}
+      <div class="absolute inset-0 flex items-center justify-center text-slate-500 text-sm pointer-events-none">
+        No data available for this period
+      </div>
+    {/if}
+    {#if isLoading && !chart}
+      <div class="absolute inset-0 flex items-center justify-center text-slate-500 text-sm pointer-events-none">
+        Loading...
+      </div>
+    {/if}
+  </div>
 </div>

@@ -251,7 +251,7 @@
         </div>
       </div>
 
-      <div class="grid grid-cols-1 xl:grid-cols-3 gap-4 md:gap-5 mt-5">
+      <div class="grid grid-cols-1 xl:grid-cols-3 gap-4 md:gap-5 mt-5 h-[26rem]">
         <div class="xl:col-span-2 animate-fade-in-up stagger-5 h-full">
           <HistoryChart {token} />
         </div>

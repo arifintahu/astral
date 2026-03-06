@@ -22,8 +22,8 @@
   }
 </script>
 
-<div class="glass-panel p-6">
-  <div class="flex justify-between items-center mb-4">
+<div class="glass-panel p-6 h-full flex flex-col">
+  <div class="flex justify-between items-center mb-4 flex-shrink-0">
     <h3 class="metric-label">Top Processes</h3>
     <div class="flex bg-white/[0.03] rounded-xl p-1 border border-white/[0.05]">
       <button
@@ -39,16 +39,16 @@
     </div>
   </div>
 
-  <div class="overflow-hidden">
+  <div class="flex-1 min-h-0 flex flex-col">
     <!-- Header -->
-    <div class="grid grid-cols-[1fr_80px_80px] gap-2 px-3 py-2 text-[10px] text-slate-600 uppercase tracking-wider font-semibold border-b border-white/[0.04]">
+    <div class="grid grid-cols-[1fr_80px_80px] gap-2 px-3 py-2 text-[10px] text-slate-600 uppercase tracking-wider font-semibold border-b border-white/[0.04] flex-shrink-0">
       <span>Process</span>
       <span class="text-right">CPU</span>
       <span class="text-right">Memory</span>
     </div>
 
     <!-- Rows -->
-    <div class="max-h-[320px] overflow-y-auto custom-scrollbar">
+    <div class="overflow-y-auto custom-scrollbar flex-1 min-h-0">
       {#each sorted as proc, i}
         <div class="grid grid-cols-[1fr_80px_80px] gap-2 px-3 py-2 items-center hover:bg-white/[0.02] transition-colors rounded-lg group {i % 2 === 0 ? '' : ''}">
           <div class="flex items-center gap-2 min-w-0">
