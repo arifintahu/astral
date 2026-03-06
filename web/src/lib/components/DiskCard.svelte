@@ -2,7 +2,6 @@
   import type { DiskInfo } from '../types';
 
   let { disks }: { disks: DiskInfo[] } = $props();
-  let sortedDisks = $derived([...disks].sort((a, b) => b.total_space - a.total_space));
 
   let rootDisk = $derived(disks.find(d => d.mount_point === '/') || disks[0]);
   let totalSpace = $derived(rootDisk ? rootDisk.total_space : 0);
@@ -17,12 +16,6 @@
     utilization >= 90 ? 'bg-rose-500/80' : utilization >= 75 ? 'bg-amber-500/80' : 'bg-gradient-to-r from-purple-500/70 to-cyan-500/70'
   );
 
-  function diskBarColor(percent: number): string {
-    if (percent >= 90) return 'bg-rose-500/60';
-    if (percent >= 75) return 'bg-amber-500/50';
-    return 'bg-slate-400/20';
-  }
-
   function formatBytes(bytes: number): string {
     if (bytes === 0) return '0 B';
     const k = 1024;
@@ -32,7 +25,7 @@
   }
 </script>
 
-<div class="glass-card p-6">
+<div class="glass-card p-6 h-full flex flex-col justify-between">
   <div class="flex justify-between items-center mb-5">
     <h3 class="metric-label">Storage</h3>
     <span class="metric-badge badge-cyan">{disks.length} mounts</span>
@@ -59,7 +52,7 @@
   </div>
 
   <!-- Disk I/O -->
-  <div class="flex gap-4 mb-4 py-2.5 px-3 bg-white/[0.02] rounded-lg border border-white/[0.03]">
+  <div class="flex gap-4 py-2.5 px-3 bg-white/[0.02] rounded-lg border border-white/[0.03]">
     <div class="flex items-center gap-2">
       <svg class="w-3 h-3 text-cyan-500/60" fill="none" stroke="currentColor" viewBox="0 0 24 24">
         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 14l-7 7m0 0l-7-7m7 7V3"></path>
@@ -76,26 +69,4 @@
       <span class="text-[12px] font-mono text-slate-300 tabular-nums">{formatBytes(totalWritten)}</span>
     </div>
   </div>
-
-  <!-- Secondary disks -->
-  {#if sortedDisks.length > 1}
-    <div class="flex flex-col gap-3 overflow-y-auto max-h-28 custom-scrollbar pr-1">
-      {#each sortedDisks as disk}
-        {@const used = disk.total_space - disk.available_space}
-        {@const percent = disk.total_space > 0 ? (used / disk.total_space) * 100 : 0}
-        <div>
-          <div class="flex justify-between text-[11px] mb-1">
-            <span class="font-mono font-medium text-slate-400 truncate max-w-[55%]" title={disk.mount_point}>{disk.mount_point}</span>
-            <span class="text-slate-600 font-mono tabular-nums">{formatBytes(used)} / {formatBytes(disk.total_space)}</span>
-          </div>
-          <div class="progress-track h-1">
-            <div
-              class="progress-fill {diskBarColor(percent)}"
-              style="width: {percent}%"
-            ></div>
-          </div>
-        </div>
-      {/each}
-    </div>
-  {/if}
 </div>

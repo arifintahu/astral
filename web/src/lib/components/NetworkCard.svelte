@@ -40,7 +40,7 @@
   }
 </script>
 
-<div class="glass-card p-6">
+<div class="glass-card p-6 h-full flex flex-col justify-between">
   <div class="flex justify-between items-center mb-5">
     <h3 class="metric-label">Network</h3>
   </div>

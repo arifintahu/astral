@@ -232,10 +232,10 @@
 
     {#if metrics}
       <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4 md:gap-5">
-        <div class="animate-fade-in-up stagger-1">
+        <div class="animate-fade-in-up stagger-1 h-full">
           <CpuCard usage={metrics.cpu_usage} cores={metrics.cpu_cores} history={cpuHistory} />
         </div>
-        <div class="animate-fade-in-up stagger-2">
+        <div class="animate-fade-in-up stagger-2 h-full">
           <MemoryCard
             used={metrics.used_memory}
             total={metrics.total_memory}
@@ -243,19 +243,19 @@
             swap_total={metrics.total_swap}
           />
         </div>
-        <div class="animate-fade-in-up stagger-3">
+        <div class="animate-fade-in-up stagger-3 h-full">
           <NetworkCard tx={metrics.network_tx} rx={metrics.network_rx} {txHistory} {rxHistory} />
         </div>
-        <div class="animate-fade-in-up stagger-4">
+        <div class="animate-fade-in-up stagger-4 h-full">
           <DiskCard disks={metrics.disks} />
         </div>
       </div>
 
       <div class="grid grid-cols-1 xl:grid-cols-3 gap-4 md:gap-5 mt-5">
-        <div class="xl:col-span-2 animate-fade-in-up stagger-5">
+        <div class="xl:col-span-2 animate-fade-in-up stagger-5 h-full">
           <HistoryChart {token} />
         </div>
-        <div class="animate-fade-in-up" style="animation-delay: 0.35s">
+        <div class="animate-fade-in-up h-full" style="animation-delay: 0.35s">
           <ProcessList processes={metrics.processes} totalMemory={metrics.total_memory} />
         </div>
       </div>
