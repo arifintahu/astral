@@ -33,7 +33,7 @@
 
     <!-- Dropdown -->
     <div class="absolute right-0 top-full mt-2 z-50 w-56 animate-fade-in">
-      <div class="bg-slate-900/95 backdrop-blur-2xl border border-white/[0.08] rounded-xl shadow-2xl p-4 space-y-4">
+      <div class="bg-slate-950 border border-white/[0.1] rounded-xl shadow-2xl p-4 space-y-4">
         <!-- Refresh Rate -->
         <div>
           <div class="text-[10px] text-slate-500 uppercase tracking-[0.15em] font-semibold mb-2">Refresh Rate</div>

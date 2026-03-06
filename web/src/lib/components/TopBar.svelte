@@ -21,7 +21,7 @@
   }
 </script>
 
-<header class="glass-panel mb-6 animate-fade-in-up">
+<header class="glass-panel mb-6 animate-fade-in-up relative z-30">
   <div class="flex justify-between items-center px-6 py-5">
     <div class="flex items-center gap-4">
       <!-- Logo mark -->
