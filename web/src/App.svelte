@@ -41,7 +41,7 @@
   });
 </script>
 
-<div class="min-h-screen bg-zinc-900 text-zinc-100 p-4 md:p-8 font-sans">
+<div class="min-h-screen p-4 md:p-8 font-sans">
   <TopBar metrics={metrics} />
 
   {#if metrics}
@@ -58,12 +58,12 @@
     </div>
     
     <div class="mt-6">
-        <HistoryChart window="6h" />
+        <HistoryChart />
     </div>
   {:else}
     <div class="flex flex-col justify-center items-center h-96 gap-4">
-      <div class="animate-spin rounded-full h-16 w-16 border-4 border-zinc-700 border-t-emerald-500"></div>
-      <p class="text-zinc-500 font-mono animate-pulse">Establishing Uplink...</p>
+      <div class="animate-spin rounded-full h-16 w-16 border-4 border-slate-700 border-t-cyan-500 shadow-[0_0_15px_rgba(6,182,212,0.5)]"></div>
+      <p class="text-cyan-400 font-mono animate-pulse tracking-widest text-sm uppercase">Establishing Uplink...</p>
     </div>
   {/if}
 </div>

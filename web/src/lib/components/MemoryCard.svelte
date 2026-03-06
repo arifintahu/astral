@@ -10,22 +10,22 @@
   }
 </script>
 
-<div class="bg-zinc-800 rounded-lg p-4 shadow-md border border-zinc-700">
+<div class="glass-card p-6">
   <div class="flex justify-between items-center mb-4">
-    <h3 class="text-zinc-400 text-sm font-semibold uppercase tracking-wider">Memory</h3>
-    <span class="text-xs font-mono text-zinc-500 bg-zinc-900 px-2 py-1 rounded">
+    <h3 class="text-slate-400 text-xs font-bold uppercase tracking-widest">Memory</h3>
+    <span class="text-xs font-mono text-cyan-300 bg-cyan-900/30 px-2 py-1 rounded border border-cyan-800/50 shadow-[0_0_10px_rgba(6,182,212,0.1)]">
         Swap: {formatBytes(swap_used)} / {formatBytes(swap_total)}
     </span>
   </div>
   
   <div class="flex items-end justify-between gap-4">
-    <div class="text-4xl font-bold text-white tracking-tighter tabular-nums">
-      {((used / total) * 100).toFixed(1)}<span class="text-lg text-zinc-500 ml-1">%</span>
+    <div class="text-5xl font-bold text-white tracking-tighter tabular-nums drop-shadow-xl">
+      {((used / total) * 100).toFixed(1)}<span class="text-xl text-slate-500 ml-1 font-light">%</span>
     </div>
     
     <div class="text-right">
-        <div class="text-sm font-mono text-zinc-300">{formatBytes(used)}</div>
-        <div class="text-xs text-zinc-500 font-mono">of {formatBytes(total)}</div>
+        <div class="text-sm font-mono text-cyan-200">{formatBytes(used)}</div>
+        <div class="text-xs text-slate-500 font-mono">of {formatBytes(total)}</div>
     </div>
   </div>
 </div>
