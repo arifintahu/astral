@@ -1,0 +1,71 @@
+use axum::{
+    extract::{Query, State},
+    response::{sse::{Event, Sse}, IntoResponse},
+    routing::get,
+    Json, Router,
+};
+use futures::stream::Stream;
+use serde::Deserialize;
+use std::{convert::Infallible, time::Duration};
+use tokio::sync::broadcast;
+use tokio_stream::wrappers::BroadcastStream;
+use tokio_stream::StreamExt;
+use crate::db::Db;
+use crate::metrics::SystemMetrics;
+
+#[derive(Clone)]
+pub struct AppState {
+    pub db: Db,
+    pub tx: broadcast::Sender<SystemMetrics>,
+}
+
+pub fn app(state: AppState) -> Router {
+    Router::new()
+        .route("/api/stream", get(sse_handler))
+        .route("/api/history", get(history_handler))
+        .with_state(state)
+}
+
+async fn sse_handler(
+    State(state): State<AppState>,
+) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
+    let rx = state.tx.subscribe();
+    let stream = BroadcastStream::new(rx);
+
+    Sse::new(stream.map(|msg| {
+        match msg {
+            Ok(metrics) => {
+                let data = serde_json::to_string(&metrics).unwrap_or_default();
+                Ok(Event::default().data(data))
+            }
+            Err(_) => Ok(Event::default().comment("missed message")),
+        }
+    }))
+    .keep_alive(axum::response::sse::KeepAlive::new().interval(Duration::from_secs(1)))
+}
+
+#[derive(Deserialize)]
+struct HistoryQuery {
+    window: String, // 6h, 24h, 7d, all
+}
+
+async fn history_handler(
+    State(state): State<AppState>,
+    Query(query): Query<HistoryQuery>,
+) -> impl IntoResponse {
+    let (table, duration) = match query.window.as_str() {
+        "6h" => ("metrics_5m", 6 * 3600),
+        "24h" => ("metrics_15m", 24 * 3600),
+        "7d" => ("metrics_1h", 7 * 24 * 3600),
+        "all" => ("metrics_1h", 90 * 24 * 3600),
+        _ => ("metrics_5m", 6 * 3600),
+    };
+
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() as i64;
+    let from_ts = now - duration;
+
+    match state.db.get_history(table, from_ts).await {
+        Ok(data) => Json(data).into_response(),
+        Err(e) => (axum::http::StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+    }
+}
