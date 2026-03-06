@@ -1,3 +1,4 @@
+use crate::api::AlertEvent;
 use crate::db::{Db, MetricPoint};
 use crate::metrics::SystemMetrics;
 use anyhow::Result;
@@ -12,6 +13,7 @@ pub struct Worker {
     alert_cpu_threshold: f32,
     alert_ram_threshold: f32,
     webhook_url: Option<String>,
+    alert_tx: broadcast::Sender<AlertEvent>,
 }
 
 impl Worker {
@@ -21,6 +23,7 @@ impl Worker {
         alert_cpu_threshold: f32,
         alert_ram_threshold: f32,
         webhook_url: Option<String>,
+        alert_tx: broadcast::Sender<AlertEvent>,
     ) -> Self {
         Self {
             db,
@@ -29,6 +32,7 @@ impl Worker {
             alert_cpu_threshold,
             alert_ram_threshold,
             webhook_url,
+            alert_tx,
         }
     }
 
@@ -52,20 +56,20 @@ impl Worker {
                     if let Err(e) = self.aggregate_and_store("metrics_1m", "metrics_5m", 5).await {
                          eprintln!("Error processing 5m metrics: {}", e);
                     }
-                    let _ = self.db.cleanup("metrics_1m", 3600 * 2).await; 
+                    let _ = self.db.cleanup("metrics_1m", 3600 * 2).await;
                 }
                 _ = ticker_15m.tick() => {
                     if let Err(e) = self.aggregate_and_store("metrics_5m", "metrics_15m", 3).await {
                          eprintln!("Error processing 15m metrics: {}", e);
                     }
-                    let _ = self.db.cleanup("metrics_5m", 86400 * 2).await; 
+                    let _ = self.db.cleanup("metrics_5m", 86400 * 2).await;
                 }
                 _ = ticker_1h.tick() => {
                     if let Err(e) = self.aggregate_and_store("metrics_15m", "metrics_1h", 4).await {
                          eprintln!("Error processing 1h metrics: {}", e);
                     }
-                    let _ = self.db.cleanup("metrics_15m", 86400 * 7).await; 
-                    let _ = self.db.cleanup("metrics_1h", 86400 * 90).await; 
+                    let _ = self.db.cleanup("metrics_15m", 86400 * 7).await;
+                    let _ = self.db.cleanup("metrics_1h", 86400 * 90).await;
                 }
             }
         }
@@ -98,25 +102,25 @@ impl Worker {
         self.buffer.clear();
 
         let threshold_mem_bytes = (total_memory as f64 * self.alert_ram_threshold as f64 / 100.0) as i64;
-        
+
         let alert_triggered = self.db.check_alert_condition(
-            "metrics_1m", 
-            self.alert_cpu_threshold as f64, 
-            threshold_mem_bytes, 
-            300 
+            "metrics_1m",
+            self.alert_cpu_threshold as f64,
+            threshold_mem_bytes,
+            300
         ).await?;
 
         if alert_triggered {
-            self.send_alert().await?;
+            self.send_alert(avg_cpu, avg_mem, total_memory, threshold_mem_bytes).await?;
         }
-        
+
         Ok(())
     }
 
     async fn aggregate_and_store(&self, source_table: &str, target_table: &str, limit_minutes: i64) -> Result<()> {
          let now = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs() as i64;
          let start_ts = now - (limit_minutes * 60);
-         
+
          if let Some(metric) = self.db.get_average(source_table, start_ts).await? {
              let point = MetricPoint {
                  timestamp: now,
@@ -124,11 +128,38 @@ impl Worker {
              };
              self.db.insert_metric(target_table, point).await?;
          }
-         
+
          Ok(())
     }
 
-    async fn send_alert(&self) -> Result<()> {
+    async fn send_alert(&self, avg_cpu: f64, avg_mem: f64, total_memory: u64, threshold_mem_bytes: i64) -> Result<()> {
+        let now = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs() as i64;
+
+        // Check CPU alert
+        if avg_cpu > self.alert_cpu_threshold as f64 {
+            let alert = AlertEvent {
+                kind: "cpu".to_string(),
+                message: format!("CPU usage at {:.1}% (threshold: {}%)", avg_cpu, self.alert_cpu_threshold),
+                value: avg_cpu,
+                threshold: self.alert_cpu_threshold as f64,
+                timestamp: now,
+            };
+            let _ = self.alert_tx.send(alert);
+        }
+
+        // Check RAM alert
+        let mem_percent = if total_memory > 0 { (avg_mem / total_memory as f64) * 100.0 } else { 0.0 };
+        if avg_mem > threshold_mem_bytes as f64 {
+            let alert = AlertEvent {
+                kind: "ram".to_string(),
+                message: format!("Memory usage at {:.1}% (threshold: {}%)", mem_percent, self.alert_ram_threshold),
+                value: mem_percent,
+                threshold: self.alert_ram_threshold as f64,
+                timestamp: now,
+            };
+            let _ = self.alert_tx.send(alert);
+        }
+
         if let Some(url) = &self.webhook_url {
             println!("ALERT TRIGGERED! Sending webhook to {}", url);
         }

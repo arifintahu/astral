@@ -1,14 +1,16 @@
 use axum::{
     body::Body,
-    http::{Request, StatusCode, HeaderValue},
+    http::{Request, StatusCode},
     middleware::{self, Next},
     response::{IntoResponse, Response},
-    routing::get,
-    Router,
+    routing::{get, post},
+    Json, Router,
 };
 use clap::Parser;
+use hmac::{Hmac, Mac};
 use rust_embed::RustEmbed;
-use std::{net::SocketAddr, sync::Arc};
+use sha2::Sha256;
+use std::net::SocketAddr;
 use tokio::sync::broadcast;
 use tower_http::cors::CorsLayer;
 
@@ -21,6 +23,8 @@ use api::AppState;
 use db::Db;
 use metrics::SystemMetrics;
 use worker::Worker;
+
+type HmacSha256 = Hmac<Sha256>;
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
@@ -48,6 +52,13 @@ struct Args {
 #[folder = "web/dist"]
 struct Assets;
 
+#[derive(Clone)]
+struct AuthConfig {
+    username: String,
+    password: String,
+    secret: String,
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt::init();
@@ -67,11 +78,18 @@ async fn main() -> anyhow::Result<()> {
         (username, password)
     };
 
+    let secret = uuid::Uuid::new_v4().to_string();
+    let auth_config = AuthConfig {
+        username,
+        password,
+        secret,
+    };
+
     // Initialize DB
     let db = Db::new("sqlite:astral.db?mode=rwc").await?;
 
     // Metrics Channel
-    let (tx, rx) = broadcast::channel::<SystemMetrics>(100);
+    let (tx, _rx) = broadcast::channel::<SystemMetrics>(100);
 
     // Start Metrics Collector
     let tx_clone = tx.clone();
@@ -82,92 +100,137 @@ async fn main() -> anyhow::Result<()> {
     // Start Worker
     let worker_rx = tx.subscribe();
     let worker_db = db.clone();
+    let alert_tx = api::create_alert_channel();
+    let alert_tx_worker = alert_tx.clone();
     let worker = Worker::new(
         worker_db,
         worker_rx,
         args.alert_cpu,
         args.alert_ram,
         args.webhook,
+        alert_tx_worker,
     );
     tokio::spawn(async move {
         worker.run().await;
     });
 
     // Setup Router
-    let app_state = AppState { db, tx };
-    
+    let app_state = AppState { db, tx, alert_tx };
+    let auth_config_clone = auth_config.clone();
+
     let api_router = api::app(app_state);
-    
+
     // Auth Middleware
     let auth_layer = middleware::from_fn(move |req: Request<Body>, next: Next| {
-        let username = username.clone();
-        let password = password.clone();
+        let config = auth_config_clone.clone();
         async move {
-            auth_middleware(req, next, username, password).await
+            auth_middleware(req, next, config).await
         }
     });
 
-    let app = Router::new()
-        .merge(api_router)
+    // Protected API routes (require auth)
+    let protected_api = api_router
+        .route("/api/auth/check", get(|| async { StatusCode::OK }))
+        .layer(auth_layer);
+
+    // Public routes (Login + Static Files)
+    let login_config = auth_config.clone();
+    let public_routes = Router::new()
+        .route("/api/login", post(move |body: Json<LoginRequest>| {
+            let config = login_config.clone();
+            async move { handle_login(body, config) }
+        }))
         .route("/", get(index_handler))
-        .route("/{*file}", get(static_handler))
-        .layer(auth_layer)
+        .route("/{*file}", get(static_handler));
+
+    let app = Router::new()
+        .merge(protected_api)
+        .merge(public_routes)
         .layer(CorsLayer::permissive());
 
     let addr = SocketAddr::from(([0, 0, 0, 0], args.port));
     println!("Listening on {}", addr);
-    
+
     let listener = tokio::net::TcpListener::bind(addr).await?;
     axum::serve(listener, app).await?;
 
     Ok(())
 }
 
+fn create_session_token(secret: &str, username: &str) -> String {
+    let mut mac = HmacSha256::new_from_slice(secret.as_bytes()).unwrap();
+    let payload = format!("astral:{}:{}", username, "session");
+    mac.update(payload.as_bytes());
+    hex::encode(mac.finalize().into_bytes())
+}
+
+fn verify_session_token(secret: &str, username: &str, token: &str) -> bool {
+    let expected = create_session_token(secret, username);
+    expected == token
+}
+
+#[derive(serde::Deserialize)]
+struct LoginRequest {
+    username: String,
+    password: String,
+}
+
+#[derive(serde::Serialize)]
+struct LoginResponse {
+    token: String,
+    username: String,
+}
+
+fn handle_login(
+    Json(body): Json<LoginRequest>,
+    config: AuthConfig,
+) -> Response {
+    if body.username == config.username && body.password == config.password {
+        let token = create_session_token(&config.secret, &body.username);
+        let resp = LoginResponse {
+            token,
+            username: body.username,
+        };
+        Json(resp).into_response()
+    } else {
+        StatusCode::UNAUTHORIZED.into_response()
+    }
+}
+
 async fn auth_middleware(
     req: Request<Body>,
     next: Next,
-    expected_user: String,
-    expected_pass: String,
+    config: AuthConfig,
 ) -> Response {
-    use base64::Engine;
-    
-    let auth_header = req.headers().get("Authorization");
-    
-    if let Some(header) = auth_header {
-        if let Ok(auth_str) = header.to_str() {
-            if auth_str.starts_with("Basic ") {
-                let token = &auth_str[6..];
-                if let Ok(decoded) = base64::engine::general_purpose::STANDARD.decode(token) {
-                    if let Ok(cred) = String::from_utf8(decoded) {
-                        let parts: Vec<&str> = cred.splitn(2, ':').collect();
-                        if parts.len() == 2 && parts[0] == expected_user && parts[1] == expected_pass {
-                            return next.run(req).await;
-                        }
-                    }
+    // Check for session token in Authorization: Bearer header
+    if let Some(auth_header) = req.headers().get("Authorization") {
+        if let Ok(auth_str) = auth_header.to_str() {
+            if auth_str.starts_with("Bearer ") {
+                let token = &auth_str[7..];
+                if verify_session_token(&config.secret, &config.username, token) {
+                    return next.run(req).await;
                 }
             }
         }
     }
 
-    let mut response = StatusCode::UNAUTHORIZED.into_response();
-    response.headers_mut().insert(
-        "WWW-Authenticate", 
-        HeaderValue::from_static("Basic realm=\"Astral\"")
-    );
-    response
+    StatusCode::UNAUTHORIZED.into_response()
 }
 
 async fn static_handler(axum::extract::Path(path): axum::extract::Path<String>) -> impl IntoResponse {
     let path = path.trim_start_matches('/');
-    
+
     if let Some(content) = Assets::get(path) {
         let mime = mime_guess::from_path(path).first_or_octet_stream();
         ([(axum::http::header::CONTENT_TYPE, mime.as_ref())], content.data).into_response()
     } else {
-        // Fallback to index.html for SPA routing if we had client-side routing, 
-        // but currently we just return 404 or maybe index.html?
-        // PRD says "Single-Page Elegance", likely handled by Svelte.
-        // If file not found, return 404.
+        // SPA fallback: serve index.html for non-file routes
+        if !path.contains('.') {
+            if let Some(content) = Assets::get("index.html") {
+                let mime = mime_guess::from_path("index.html").first_or_octet_stream();
+                return ([(axum::http::header::CONTENT_TYPE, mime.as_ref())], content.data).into_response();
+            }
+        }
         StatusCode::NOT_FOUND.into_response()
     }
 }

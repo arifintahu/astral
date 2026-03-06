@@ -3,6 +3,15 @@ export interface DiskInfo {
     mount_point: string;
     total_space: number;
     available_space: number;
+    read_bytes: number;
+    written_bytes: number;
+}
+
+export interface ProcessInfo {
+    pid: number;
+    name: string;
+    cpu_usage: number;
+    memory: number;
 }
 
 export interface SystemMetrics {
@@ -19,4 +28,13 @@ export interface SystemMetrics {
     network_tx: number;
     network_rx: number;
     disks: DiskInfo[];
+    processes: ProcessInfo[];
+}
+
+export interface AlertEvent {
+    kind: string;
+    message: string;
+    value: number;
+    threshold: number;
+    timestamp: number;
 }
