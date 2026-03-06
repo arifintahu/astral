@@ -2,6 +2,7 @@
   import type { DiskInfo } from '../types';
 
   let { disks }: { disks: DiskInfo[] } = $props();
+  let sortedDisks = $derived([...disks].sort((a, b) => b.total_space - a.total_space));
 
   function formatBytes(bytes: number): string {
     if (bytes === 0) return '0 B';
@@ -19,7 +20,7 @@
   </div>
   
   <div class="flex flex-col gap-6 overflow-y-auto max-h-52 scrollbar-thin scrollbar-thumb-white/20 scrollbar-track-transparent pr-2">
-    {#each disks as disk}
+    {#each sortedDisks as disk}
       {@const used = disk.total_space - disk.available_space}
       {@const percent = (used / disk.total_space) * 100}
       <div>
