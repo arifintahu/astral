@@ -1,7 +1,13 @@
 <script lang="ts">
   import type { SystemMetrics } from '../types';
+  import Settings from './Settings.svelte';
 
-  let { metrics }: { metrics: SystemMetrics | null } = $props();
+  let { metrics, refreshRate, onRefreshRateChange, onLogout }: {
+    metrics: SystemMetrics | null,
+    refreshRate: number,
+    onRefreshRateChange: (rate: number) => void,
+    onLogout: () => void,
+  } = $props();
 
   function formatUptime(uptime: number): string {
     const days = Math.floor(uptime / 86400);
@@ -40,7 +46,7 @@
       </div>
     </div>
 
-    <div class="flex items-center gap-5">
+    <div class="flex items-center gap-4">
       {#if metrics}
         <!-- Status indicator -->
         <div class="flex items-center gap-2">
@@ -51,18 +57,22 @@
         <div class="h-6 w-px bg-white/[0.08]"></div>
 
         <!-- Uptime -->
-        <div class="text-right">
+        <div class="text-right hidden sm:block">
           <div class="text-lg font-mono text-slate-200 font-semibold tabular-nums tracking-tight">
             {formatUptime(metrics.uptime)}
           </div>
           <div class="text-[10px] text-slate-500 uppercase tracking-[0.15em] font-semibold mt-0.5">Uptime</div>
         </div>
+
+        <div class="h-6 w-px bg-white/[0.08] hidden sm:block"></div>
       {:else}
         <div class="flex items-center gap-2">
           <div class="w-2 h-2 rounded-full bg-amber-400 animate-pulse"></div>
           <span class="text-[11px] text-amber-400/80 font-medium uppercase tracking-wider font-mono">Connecting</span>
         </div>
       {/if}
+
+      <Settings {refreshRate} {onRefreshRateChange} {onLogout} />
     </div>
   </div>
 </header>

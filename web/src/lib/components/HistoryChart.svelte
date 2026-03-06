@@ -3,6 +3,8 @@
   import uPlot from 'uplot';
   import 'uplot/dist/uPlot.min.css';
 
+  let { token }: { token: string } = $props();
+
   let window = $state('6h');
   let chartContainer: HTMLDivElement;
   let chart: uPlot;
@@ -20,7 +22,9 @@
   async function fetchData() {
     try {
         isLoading = true;
-        const res = await fetch(`/api/history?window=${window}`);
+        const res = await fetch(`/api/history?window=${window}`, {
+            headers: token ? { 'Authorization': `Bearer ${token}` } : {},
+        });
         if (!res.ok) return;
         const data = await res.json();
 

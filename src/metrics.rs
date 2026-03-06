@@ -1,6 +1,5 @@
 use serde::Serialize;
-use std::sync::{Arc, Mutex};
-use sysinfo::{CpuRefreshKind, Disks, MemoryRefreshKind, Networks, RefreshKind, System};
+use sysinfo::{CpuRefreshKind, Disks, MemoryRefreshKind, Networks, ProcessesToUpdate, RefreshKind, System};
 use tokio::sync::broadcast;
 use tokio::time::{interval, Duration};
 
@@ -19,6 +18,7 @@ pub struct SystemMetrics {
     pub network_tx: u64,
     pub network_rx: u64,
     pub disks: Vec<DiskInfo>,
+    pub processes: Vec<ProcessInfo>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -27,6 +27,16 @@ pub struct DiskInfo {
     pub mount_point: String,
     pub total_space: u64,
     pub available_space: u64,
+    pub read_bytes: u64,
+    pub written_bytes: u64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ProcessInfo {
+    pub pid: u32,
+    pub name: String,
+    pub cpu_usage: f32,
+    pub memory: u64,
 }
 
 pub struct MetricsCollector {
@@ -44,9 +54,10 @@ impl MetricsCollector {
         );
         let networks = Networks::new_with_refreshed_list();
         let disks = Disks::new_with_refreshed_list();
-        
+
         // Initial refresh
         system.refresh_all();
+        system.refresh_processes(ProcessesToUpdate::All, true);
 
         Self {
             system,
@@ -57,12 +68,13 @@ impl MetricsCollector {
 
     pub fn collect(&mut self) -> SystemMetrics {
         self.system.refresh_all();
+        self.system.refresh_processes(ProcessesToUpdate::All, true);
         self.networks.refresh(true);
         self.disks.refresh(true);
 
         let cpu_usage = self.system.global_cpu_usage();
         let cpu_cores = self.system.cpus().len();
-        
+
         let mut network_tx = 0;
         let mut network_rx = 0;
         for (_, network) in &self.networks {
@@ -70,12 +82,31 @@ impl MetricsCollector {
             network_rx += network.received();
         }
 
-        let disks = self.disks.iter().map(|disk| DiskInfo {
-            name: disk.name().to_string_lossy().to_string(),
-            mount_point: disk.mount_point().to_string_lossy().to_string(),
-            total_space: disk.total_space(),
-            available_space: disk.available_space(),
+        let disks = self.disks.iter().map(|disk| {
+            let usage = disk.usage();
+            DiskInfo {
+                name: disk.name().to_string_lossy().to_string(),
+                mount_point: disk.mount_point().to_string_lossy().to_string(),
+                total_space: disk.total_space(),
+                available_space: disk.available_space(),
+                read_bytes: usage.read_bytes,
+                written_bytes: usage.written_bytes,
+            }
         }).collect();
+
+        // Collect top processes by CPU + memory
+        let mut procs: Vec<ProcessInfo> = self.system.processes().iter().map(|(pid, proc_)| {
+            ProcessInfo {
+                pid: pid.as_u32(),
+                name: proc_.name().to_string_lossy().to_string(),
+                cpu_usage: proc_.cpu_usage(),
+                memory: proc_.memory(),
+            }
+        }).collect();
+
+        // Sort by CPU usage descending, take top 10
+        procs.sort_by(|a, b| b.cpu_usage.partial_cmp(&a.cpu_usage).unwrap_or(std::cmp::Ordering::Equal));
+        procs.truncate(15);
 
         SystemMetrics {
             hostname: System::host_name().unwrap_or_default(),
@@ -91,6 +122,7 @@ impl MetricsCollector {
             network_tx,
             network_rx,
             disks,
+            processes: procs,
         }
     }
 }

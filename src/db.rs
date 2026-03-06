@@ -1,5 +1,5 @@
 use anyhow::Result;
-use sqlx::{sqlite::SqlitePool, FromRow, Row};
+use sqlx::{sqlite::SqlitePool, FromRow};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 #[derive(Clone)]
