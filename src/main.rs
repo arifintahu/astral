@@ -120,7 +120,7 @@ async fn main() -> anyhow::Result<()> {
 
     let api_router = api::app(app_state);
 
-    // Auth Middleware — skips /api/login so the login endpoint is public
+    // Auth Middleware
     let auth_layer = middleware::from_fn(move |req: Request<Body>, next: Next| {
         let config = auth_config_clone.clone();
         async move {
@@ -128,21 +128,24 @@ async fn main() -> anyhow::Result<()> {
         }
     });
 
-    // Login route (no auth required — placed outside the auth layer)
+    // Protected API routes (require auth)
+    let protected_api = api_router
+        .route("/api/auth/check", get(|| async { StatusCode::OK }))
+        .layer(auth_layer);
+
+    // Public routes (Login + Static Files)
     let login_config = auth_config.clone();
-    let login_router = Router::new()
+    let public_routes = Router::new()
         .route("/api/login", post(move |body: Json<LoginRequest>| {
             let config = login_config.clone();
             async move { handle_login(body, config) }
         }))
-        .route("/api/auth/check", get(|| async { StatusCode::OK }));
+        .route("/", get(index_handler))
+        .route("/{*file}", get(static_handler));
 
     let app = Router::new()
-        .merge(api_router)
-        .route("/", get(index_handler))
-        .route("/{*file}", get(static_handler))
-        .layer(auth_layer)
-        .merge(login_router)
+        .merge(protected_api)
+        .merge(public_routes)
         .layer(CorsLayer::permissive());
 
     let addr = SocketAddr::from(([0, 0, 0, 0], args.port));
