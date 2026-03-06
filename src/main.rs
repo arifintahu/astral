@@ -199,28 +199,13 @@ async fn auth_middleware(
     next: Next,
     config: AuthConfig,
 ) -> Response {
-    use base64::Engine;
-
     // Check for session token in Authorization: Bearer header
     if let Some(auth_header) = req.headers().get("Authorization") {
         if let Ok(auth_str) = auth_header.to_str() {
-            // Bearer token (session-based)
             if auth_str.starts_with("Bearer ") {
                 let token = &auth_str[7..];
                 if verify_session_token(&config.secret, &config.username, token) {
                     return next.run(req).await;
-                }
-            }
-            // Legacy Basic Auth support
-            if auth_str.starts_with("Basic ") {
-                let b64_token = &auth_str[6..];
-                if let Ok(decoded) = base64::engine::general_purpose::STANDARD.decode(b64_token) {
-                    if let Ok(cred) = String::from_utf8(decoded) {
-                        let parts: Vec<&str> = cred.splitn(2, ':').collect();
-                        if parts.len() == 2 && parts[0] == config.username && parts[1] == config.password {
-                            return next.run(req).await;
-                        }
-                    }
                 }
             }
         }
