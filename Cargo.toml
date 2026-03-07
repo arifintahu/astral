@@ -1,6 +1,6 @@
 [package]
 name = "astral"
-version = "0.1.0"
+version = "1.0.0"
 edition = "2024"
 
 [dependencies]
@@ -27,3 +27,10 @@ uuid = { version = "1.22.0", features = ["v4", "fast-rng"] }
 hmac = "0.12"
 sha2 = "0.10"
 hex = "0.4"
+
+[profile.release]
+opt-level = "z"     # Optimize for size
+lto = true          # Enable Link Time Optimization (removes dead code)
+codegen-units = 1   # Slower compile time, but smaller binary
+strip = true        # Automatically strip symbols from the binary
+panic = "abort"     # Removes panic unwinding code (reduces size)

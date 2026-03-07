@@ -23,6 +23,16 @@ Astral provides a modern, single-page web UI that displays real-time system heal
 -   **Alerting:** Configurable webhook alerts for high CPU or Memory usage (sustained for 5 minutes).
 -   **Lightweight:** Minimal resource footprint, designed for small to medium-sized VPS and servers.
 
+## Benchmarks
+
+Running `./benchmark.sh` on a standard development environment:
+
+| Metric | Value |
+| :--- | :--- |
+| **Binary Size** | 3.6M (3761056 bytes) |
+| **Execution Time** | 0.17ms (Time to Ready) |
+| **Peak Memory (RSS)** | 5.75 MB |
+
 ## Installation
 
 ### Download Binary

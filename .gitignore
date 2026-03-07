@@ -1,2 +1,4 @@
 /target
 *.db
+*.log
+wait_for_port.py
