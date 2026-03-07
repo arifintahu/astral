@@ -2,6 +2,16 @@ use anyhow::Result;
 use sqlx::{sqlite::SqlitePool, FromRow};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+const VALID_TABLES: &[&str] = &["metrics_1m", "metrics_5m", "metrics_15m", "metrics_1h"];
+
+fn validate_table<'a>(table: &'a str) -> Result<&'a str> {
+    if VALID_TABLES.contains(&table) {
+        Ok(table)
+    } else {
+        anyhow::bail!("Invalid table name")
+    }
+}
+
 #[derive(Clone)]
 pub struct Db {
     pool: SqlitePool,
@@ -27,6 +37,7 @@ impl Db {
     async fn init(&self) -> Result<()> {
         let tables = ["metrics_1m", "metrics_5m", "metrics_15m", "metrics_1h"];
         for table in tables {
+            let table = validate_table(table)?;
             sqlx::query(&format!(
                 "CREATE TABLE IF NOT EXISTS {} (
                     timestamp INTEGER PRIMARY KEY,
@@ -44,6 +55,7 @@ impl Db {
     }
 
     pub async fn insert_metric(&self, table: &str, metric: MetricPoint) -> Result<()> {
+        let table = validate_table(table)?;
         let query = format!(
             "INSERT OR REPLACE INTO {} (timestamp, cpu_usage, used_memory, network_tx, network_rx) VALUES (?, ?, ?, ?, ?)",
             table
@@ -60,6 +72,7 @@ impl Db {
     }
 
     pub async fn get_history(&self, table: &str, start_ts: i64) -> Result<Vec<MetricPoint>> {
+        let table = validate_table(table)?;
         let query = format!(
             "SELECT timestamp, cpu_usage, used_memory, network_tx, network_rx FROM {} WHERE timestamp >= ? ORDER BY timestamp ASC",
             table
@@ -72,6 +85,7 @@ impl Db {
     }
 
     pub async fn cleanup(&self, table: &str, retention_seconds: i64) -> Result<()> {
+        let table = validate_table(table)?;
         let now = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs() as i64;
         let cutoff = now - retention_seconds;
         let query = format!("DELETE FROM {} WHERE timestamp < ?", table);
@@ -80,6 +94,7 @@ impl Db {
     }
 
     pub async fn get_average(&self, table: &str, start_ts: i64) -> Result<Option<MetricPoint>> {
+        let table = validate_table(table)?;
         let query = format!(
             "SELECT 
                 AVG(cpu_usage) as cpu_usage, 
@@ -109,6 +124,7 @@ impl Db {
     }
 
     pub async fn check_alert_condition(&self, table: &str, threshold_cpu: f64, threshold_mem: i64, duration_seconds: i64) -> Result<bool> {
+        let table = validate_table(table)?;
         let now = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs() as i64;
         let start_ts = now - duration_seconds;
         

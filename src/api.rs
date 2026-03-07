@@ -100,6 +100,9 @@ async fn history_handler(
 
     match state.db.get_history(table, from_ts).await {
         Ok(data) => Json(data).into_response(),
-        Err(e) => (axum::http::StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+        Err(e) => {
+            tracing::error!("History query failed: {:#}", e);
+            axum::http::StatusCode::INTERNAL_SERVER_ERROR.into_response()
+        }
     }
 }

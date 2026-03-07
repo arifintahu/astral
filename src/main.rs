@@ -1,18 +1,24 @@
 use axum::{
     body::Body,
+    extract::ConnectInfo,
     http::{Request, StatusCode},
     middleware::{self, Next},
     response::{IntoResponse, Response},
     routing::{get, post},
     Json, Router,
 };
+use argon2::{
+    password_hash::{rand_core::OsRng, PasswordHash, PasswordHasher, PasswordVerifier, SaltString},
+    Argon2,
+};
 use clap::Parser;
 use hmac::{Hmac, Mac};
 use rust_embed::RustEmbed;
 use sha2::Sha256;
+use std::collections::HashMap;
 use std::net::SocketAddr;
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
 use tokio::sync::broadcast;
-use tower_http::cors::CorsLayer;
 
 mod api;
 mod db;
@@ -55,8 +61,40 @@ struct Assets;
 #[derive(Clone)]
 struct AuthConfig {
     username: String,
-    password: String,
+    password_hash: String,
     secret: String,
+}
+
+const MAX_LOGIN_ATTEMPTS: u32 = 5;
+const RATE_LIMIT_WINDOW_SECS: u64 = 60;
+const SESSION_MAX_AGE_SECS: u64 = 86400;
+
+#[derive(Clone)]
+struct LoginLimiter {
+    attempts: std::sync::Arc<tokio::sync::Mutex<HashMap<std::net::IpAddr, (u32, Instant)>>>,
+}
+
+impl LoginLimiter {
+    fn new() -> Self {
+        Self {
+            attempts: std::sync::Arc::new(tokio::sync::Mutex::new(HashMap::new())),
+        }
+    }
+
+    async fn check_rate_limit(&self, ip: std::net::IpAddr) -> bool {
+        let mut map = self.attempts.lock().await;
+        let now = Instant::now();
+        let entry = map.entry(ip).or_insert((0, now));
+        if now.duration_since(entry.1) > std::time::Duration::from_secs(RATE_LIMIT_WINDOW_SECS) {
+            *entry = (1, now);
+            true
+        } else if entry.0 >= MAX_LOGIN_ATTEMPTS {
+            false
+        } else {
+            entry.0 += 1;
+            true
+        }
+    }
 }
 
 #[tokio::main]
@@ -78,12 +116,19 @@ async fn main() -> anyhow::Result<()> {
         (username, password)
     };
 
+    let salt = SaltString::generate(&mut OsRng);
+    let password_hash = Argon2::default()
+        .hash_password(password.as_bytes(), &salt)
+        .expect("Failed to hash password")
+        .to_string();
+
     let secret = uuid::Uuid::new_v4().to_string();
     let auth_config = AuthConfig {
         username,
-        password,
+        password_hash,
         secret,
     };
+    let limiter = LoginLimiter::new();
 
     // Initialize DB
     let db = Db::new("sqlite:astral.db?mode=rwc").await?;
@@ -131,10 +176,15 @@ async fn main() -> anyhow::Result<()> {
 
     // Public routes (Login + Static Files)
     let login_config = auth_config.clone();
+    let login_limiter = limiter.clone();
     let public_router = Router::new()
-        .route("/api/login", post(move |body: Json<LoginRequest>| {
+        .route("/api/login", post(move |
+            ConnectInfo(addr): ConnectInfo<SocketAddr>,
+            body: Json<LoginRequest>,
+        | {
             let config = login_config.clone();
-            async move { handle_login(body, config) }
+            let limiter = login_limiter.clone();
+            async move { handle_login(body, config, limiter, addr).await }
         }))
         .route("/", get(index_handler))
         .route("/{*file}", get(static_handler));
@@ -152,30 +202,65 @@ async fn main() -> anyhow::Result<()> {
     // The fallback route `/{*file}` in public_router is very broad.
     // If we merge public_router (with fallback) first, it might shadow protected routes if they overlap or if fallback logic is aggressive.
     // Ideally, specific routes should take precedence.
+    let security_headers = middleware::from_fn(|req: Request<Body>, next: Next| async move {
+        let mut resp = next.run(req).await;
+        let headers = resp.headers_mut();
+        headers.insert("X-Content-Type-Options", "nosniff".parse().unwrap());
+        headers.insert("X-Frame-Options", "DENY".parse().unwrap());
+        headers.insert("Referrer-Policy", "strict-origin-when-cross-origin".parse().unwrap());
+        resp
+    });
+
     let app = Router::new()
         .merge(protected_router)
         .merge(public_router)
-        .layer(CorsLayer::permissive());
+        .layer(security_headers);
 
     let addr = SocketAddr::from(([0, 0, 0, 0], args.port));
     println!("Listening on {}", addr);
 
     let listener = tokio::net::TcpListener::bind(addr).await?;
-    axum::serve(listener, app).await?;
+    axum::serve(listener, app.into_make_service_with_connect_info::<SocketAddr>()).await?;
 
     Ok(())
 }
 
 fn create_session_token(secret: &str, username: &str) -> String {
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
     let mut mac = HmacSha256::new_from_slice(secret.as_bytes()).unwrap();
-    let payload = format!("astral:{}:{}", username, "session");
+    let payload = format!("astral:{}:session:{}", username, now);
     mac.update(payload.as_bytes());
-    hex::encode(mac.finalize().into_bytes())
+    let sig = hex::encode(mac.finalize().into_bytes());
+    format!("{}.{}", now, sig)
 }
 
 fn verify_session_token(secret: &str, username: &str, token: &str) -> bool {
-    let expected = create_session_token(secret, username);
-    expected == token
+    let parts: Vec<&str> = token.splitn(2, '.').collect();
+    if parts.len() != 2 {
+        return false;
+    }
+    let timestamp: u64 = match parts[0].parse() {
+        Ok(t) => t,
+        Err(_) => return false,
+    };
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+    if now.saturating_sub(timestamp) > SESSION_MAX_AGE_SECS {
+        return false;
+    }
+    let mut mac = HmacSha256::new_from_slice(secret.as_bytes()).unwrap();
+    let payload = format!("astral:{}:session:{}", username, timestamp);
+    mac.update(payload.as_bytes());
+    let sig_bytes = match hex::decode(parts[1]) {
+        Ok(b) => b,
+        Err(_) => return false,
+    };
+    mac.verify_slice(&sig_bytes).is_ok()
 }
 
 #[derive(serde::Deserialize)]
@@ -190,11 +275,24 @@ struct LoginResponse {
     username: String,
 }
 
-fn handle_login(
+async fn handle_login(
     Json(body): Json<LoginRequest>,
     config: AuthConfig,
+    limiter: LoginLimiter,
+    addr: SocketAddr,
 ) -> Response {
-    if body.username == config.username && body.password == config.password {
+    if !limiter.check_rate_limit(addr.ip()).await {
+        return (StatusCode::TOO_MANY_REQUESTS, "Too many login attempts").into_response();
+    }
+
+    let password_ok = match PasswordHash::new(&config.password_hash) {
+        Ok(parsed) => Argon2::default()
+            .verify_password(body.password.as_bytes(), &parsed)
+            .is_ok(),
+        Err(_) => false,
+    };
+
+    if body.username == config.username && password_ok {
         let token = create_session_token(&config.secret, &body.username);
         let resp = LoginResponse {
             token,
@@ -202,7 +300,7 @@ fn handle_login(
         };
         Json(resp).into_response()
     } else {
-        println!("Failed login attempt for user: {}", body.username);
+        tracing::warn!("Failed login attempt for user: {}", body.username);
         StatusCode::UNAUTHORIZED.into_response()
     }
 }

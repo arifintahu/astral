@@ -161,7 +161,16 @@ impl Worker {
         }
 
         if let Some(url) = &self.webhook_url {
-            println!("ALERT TRIGGERED! Sending webhook to {}", url);
+            let payload = serde_json::json!({
+                "content": format!(
+                    "🚨 Astral Alert: CPU at {:.1}%, Memory at {:.1}%",
+                    avg_cpu, mem_percent
+                )
+            });
+            let client = reqwest::Client::new();
+            if let Err(e) = client.post(url).json(&payload).send().await {
+                eprintln!("Failed to send webhook: {}", e);
+            }
         }
         Ok(())
     }
