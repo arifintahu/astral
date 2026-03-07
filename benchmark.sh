@@ -38,7 +38,7 @@ import sys
 start_time = time.time()
 target_host = "127.0.0.1"
 target_port = $PORT
-timeout = 20 # seconds
+timeout = 10 # seconds
 
 while True:
     try:
@@ -47,7 +47,7 @@ while True:
         result = sock.connect_ex((target_host, target_port))
         if result == 0:
             end_time = time.time()
-            print(f"{end_time - start_time:.4f}")
+            print(f"{(end_time - start_time) * 1000:.2f}")
             sys.exit(0)
         sock.close()
     except Exception:
@@ -101,6 +101,6 @@ echo "           BENCHMARK RESULTS            "
 echo "========================================"
 
 echo "Binary Size:       $BINARY_SIZE ($BINARY_SIZE_BYTES bytes)"
-echo "Execution Time:    ${STARTUP_TIME}s (Time to Ready)"
+echo "Execution Time:    ${STARTUP_TIME}ms (Time to Ready)"
 echo "Peak Memory (RSS): ${RSS_MB} MB"
 echo "========================================"
