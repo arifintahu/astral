@@ -1,0 +1,57 @@
+services:
+  astral:
+    build: .
+    image: astral:latest
+    container_name: astral
+    restart: unless-stopped
+    
+    # Network mode "host" allows the container to see the host's network interfaces
+    # and listen directly on the host's port (default 8080).
+    # If you prefer bridge mode, uncomment 'ports' and comment 'network_mode'.
+    # network_mode: host
+    ports:
+      - "8080:8080"
+
+    # PID mode "host" allows the container to see the host's processes
+    pid: host
+
+    # Privileged mode *might* be required for some hardware sensors,
+    # but usually read-only mounts are sufficient.
+    # privileged: true
+
+    environment:
+      - RUST_LOG=info
+      # Customize these environment variables as needed
+      - ASTRAL_PORT=${ASTRAL_PORT:-8080}
+      - ASTRAL_AUTH=${ASTRAL_AUTH:-admin:secret}
+      - ASTRAL_RETENTION=${ASTRAL_RETENTION:-7}
+      - ASTRAL_WEBHOOK=${ASTRAL_WEBHOOK}
+      - ASTRAL_ALERT_CPU=${ASTRAL_ALERT_CPU:-90}
+      - ASTRAL_ALERT_RAM=${ASTRAL_ALERT_RAM:-90}
+    
+    volumes:
+      # Persist the database
+      - astral_data:/app/data
+      
+      # Mount host filesystems for metrics collection
+      # NOTE: We mount /proc to /host/proc because overlaying /proc inside the container
+      # can cause issues with container runtime execution.
+      - /:/host:ro,rslave
+      # - /proc:/proc:ro # REMOVED: Conflicts with container runtime
+      # - /sys:/sys:ro   # REMOVED: Covered by /:/host mount if app supports it
+
+    # Pass arguments to the binary, using environment variables with defaults
+    # Note: We bind to 0.0.0.0 explicitly to ensure it's accessible from outside the container
+    command: >
+      sh -c "export HOST_PROC=/host/proc && 
+      export HOST_SYS=/host/sys && 
+      ./astral 
+      --port $${ASTRAL_PORT:-8080} 
+      --auth $${ASTRAL_AUTH:-admin:secret} 
+      --retention $${ASTRAL_RETENTION:-7} 
+      --alert-cpu $${ASTRAL_ALERT_CPU:-90} 
+      --alert-ram $${ASTRAL_ALERT_RAM:-90} 
+      $${ASTRAL_WEBHOOK:+--webhook $$ASTRAL_WEBHOOK}"
+
+volumes:
+  astral_data:
