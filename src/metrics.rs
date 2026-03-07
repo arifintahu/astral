@@ -47,6 +47,12 @@ pub struct MetricsCollector {
 
 impl MetricsCollector {
     pub fn new() -> Self {
+        // sysinfo checks HOST_PROC and HOST_SYS environment variables automatically
+        // but we need to ensure they are set before System::new() if they are passed in differently
+        // In our case, we set them in docker-compose command, so they should be available.
+        // However, sysinfo might not respect them unless we use System::new_with_specifics properly or if the library version supports it.
+        // sysinfo 0.30+ respects HOST_PROC/HOST_SYS env vars on Linux.
+        
         let mut system = System::new_with_specifics(
             RefreshKind::nothing()
                 .with_cpu(CpuRefreshKind::everything())

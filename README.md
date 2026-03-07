@@ -99,12 +99,29 @@ To run the project in development mode:
     cargo run
     ```
 
-## Architecture
+## Docker Deployment
 
--   **Backend:** Rust (Axum, Tokio, SQLx, Sysinfo)
--   **Frontend:** Svelte 5, Tailwind CSS, uPlot
--   **Database:** Embedded SQLite (managed by SQLx)
+For production environments, deploying via Docker ensures a consistent runtime and easy updates.
 
-## License
+The provided `docker-compose.yml` is configured to run Astral with host networking and PID access, allowing it to monitor the host system accurately.
 
-MIT
+1.  **Configure Environment (Optional):**
+    Copy the example configuration file and customize settings (port, auth, alerts, etc.):
+    ```bash
+    cp docker.env.example .env
+    # Edit .env with your preferred text editor
+    ```
+
+2.  **Start the Service:**
+    ```bash
+    docker-compose up -d --build
+    ```
+
+3.  **Access the Dashboard:**
+    Open `http://<your-server-ip>:8080`.
+    
+    *Default credentials (if not changed in .env): `admin:secret`*
+
+**Important Notes:**
+-   **Host Monitoring:** Astral requires `--network host` and `--pid host` (along with `/proc` and `/sys` mounts) to accurately monitor the host system's CPU, memory, and network usage from within a container. Without these, it will only monitor the container's isolated environment.
+-   **Data Persistence:** The SQLite database is stored in `/app/data` inside the container. Use a volume (e.g., `astral_data`) to persist historical data across restarts.

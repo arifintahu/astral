@@ -118,6 +118,7 @@ async fn main() -> anyhow::Result<()> {
     let app_state = AppState { db, tx, alert_tx };
     let auth_config_clone = auth_config.clone();
 
+    // API Router is already built in api::app(state)
     let api_router = api::app(app_state);
 
     // Auth Middleware
@@ -128,14 +129,9 @@ async fn main() -> anyhow::Result<()> {
         }
     });
 
-    // Protected API routes (require auth)
-    let protected_api = api_router
-        .route("/api/auth/check", get(|| async { StatusCode::OK }))
-        .layer(auth_layer);
-
     // Public routes (Login + Static Files)
     let login_config = auth_config.clone();
-    let public_routes = Router::new()
+    let public_router = Router::new()
         .route("/api/login", post(move |body: Json<LoginRequest>| {
             let config = login_config.clone();
             async move { handle_login(body, config) }
@@ -143,9 +139,22 @@ async fn main() -> anyhow::Result<()> {
         .route("/", get(index_handler))
         .route("/{*file}", get(static_handler));
 
+    // Protected API routes
+    let protected_router = Router::new()
+        .merge(api_router) // /api/stream, /api/history, /api/alerts
+        .route("/api/auth/check", get(|| async { StatusCode::OK }))
+        .layer(auth_layer);
+
+    // Combine routers
+    // Note: We merge protected_router FIRST to ensure its routes are registered with priority,
+    // but the critical part is that auth_layer is already applied to it.
+    // However, axum route matching is based on path specificity.
+    // The fallback route `/{*file}` in public_router is very broad.
+    // If we merge public_router (with fallback) first, it might shadow protected routes if they overlap or if fallback logic is aggressive.
+    // Ideally, specific routes should take precedence.
     let app = Router::new()
-        .merge(protected_api)
-        .merge(public_routes)
+        .merge(protected_router)
+        .merge(public_router)
         .layer(CorsLayer::permissive());
 
     let addr = SocketAddr::from(([0, 0, 0, 0], args.port));
@@ -193,6 +202,7 @@ fn handle_login(
         };
         Json(resp).into_response()
     } else {
+        println!("Failed login attempt for user: {}", body.username);
         StatusCode::UNAUTHORIZED.into_response()
     }
 }
