@@ -36,7 +36,8 @@ services:
       # Mount host filesystems for metrics collection
       # NOTE: We mount /proc to /host/proc because overlaying /proc inside the container
       # can cause issues with container runtime execution.
-      - /:/host:ro,rslave
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
 
     # Pass arguments to the binary, using environment variables with defaults
     # Note: We bind to 0.0.0.0 explicitly to ensure it's accessible from outside the container

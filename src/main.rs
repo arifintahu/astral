@@ -1,18 +1,24 @@
 use axum::{
     body::Body,
+    extract::ConnectInfo,
     http::{Request, StatusCode},
     middleware::{self, Next},
     response::{IntoResponse, Response},
     routing::{get, post},
     Json, Router,
 };
+use argon2::{
+    password_hash::{rand_core::OsRng, PasswordHash, PasswordHasher, PasswordVerifier, SaltString},
+    Argon2,
+};
 use clap::Parser;
 use hmac::{Hmac, Mac};
 use rust_embed::RustEmbed;
 use sha2::Sha256;
+use std::collections::HashMap;
 use std::net::SocketAddr;
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
 use tokio::sync::broadcast;
-use tower_http::cors::CorsLayer;
 
 mod api;
 mod db;
@@ -55,8 +61,40 @@ struct Assets;
 #[derive(Clone)]
 struct AuthConfig {
     username: String,
-    password: String,
+    password_hash: String,
     secret: String,
+}
+
+const MAX_LOGIN_ATTEMPTS: u32 = 5;
+const RATE_LIMIT_WINDOW_SECS: u64 = 60;
+const SESSION_MAX_AGE_SECS: u64 = 86400;
+
+#[derive(Clone)]
+struct LoginLimiter {
+    attempts: std::sync::Arc<tokio::sync::Mutex<HashMap<std::net::IpAddr, (u32, Instant)>>>,
+}
+
+impl LoginLimiter {
+    fn new() -> Self {
+        Self {
+            attempts: std::sync::Arc::new(tokio::sync::Mutex::new(HashMap::new())),
+        }
+    }
+
+    async fn check_rate_limit(&self, ip: std::net::IpAddr) -> bool {
+        let mut map = self.attempts.lock().await;
+        let now = Instant::now();
+        let entry = map.entry(ip).or_insert((0, now));
+        if now.duration_since(entry.1) > std::time::Duration::from_secs(RATE_LIMIT_WINDOW_SECS) {
+            *entry = (1, now);
+            true
+        } else if entry.0 >= MAX_LOGIN_ATTEMPTS {
+            false
+        } else {
+            entry.0 += 1;
+            true
+        }
+    }
 }
 
 #[tokio::main]
@@ -78,12 +116,19 @@ async fn main() -> anyhow::Result<()> {
         (username, password)
     };
 
+    let salt = SaltString::generate(&mut OsRng);
+    let password_hash = Argon2::default()
+        .hash_password(password.as_bytes(), &salt)
+        .expect("Failed to hash password")
+        .to_string();
+
     let secret = uuid::Uuid::new_v4().to_string();
     let auth_config = AuthConfig {
         username,
-        password,
+        password_hash,
         secret,
     };
+    let limiter = LoginLimiter::new();
 
     // Initialize DB
     let db = Db::new("sqlite:astral.db?mode=rwc").await?;
@@ -131,10 +176,15 @@ async fn main() -> anyhow::Result<()> {
 
     // Public routes (Login + Static Files)
     let login_config = auth_config.clone();
+    let login_limiter = limiter.clone();
     let public_router = Router::new()
-        .route("/api/login", post(move |body: Json<LoginRequest>| {
+        .route("/api/login", post(move |
+            ConnectInfo(addr): ConnectInfo<SocketAddr>,
+            body: Json<LoginRequest>,
+        | {
             let config = login_config.clone();
-            async move { handle_login(body, config) }
+            let limiter = login_limiter.clone();
+            async move { handle_login(body, config, limiter, addr).await }
         }))
         .route("/", get(index_handler))
         .route("/{*file}", get(static_handler));
@@ -152,30 +202,65 @@ async fn main() -> anyhow::Result<()> {
     // The fallback route `/{*file}` in public_router is very broad.
     // If we merge public_router (with fallback) first, it might shadow protected routes if they overlap or if fallback logic is aggressive.
     // Ideally, specific routes should take precedence.
+    let security_headers = middleware::from_fn(|req: Request<Body>, next: Next| async move {
+        let mut resp = next.run(req).await;
+        let headers = resp.headers_mut();
+        headers.insert("X-Content-Type-Options", "nosniff".parse().unwrap());
+        headers.insert("X-Frame-Options", "DENY".parse().unwrap());
+        headers.insert("Referrer-Policy", "strict-origin-when-cross-origin".parse().unwrap());
+        resp
+    });
+
     let app = Router::new()
         .merge(protected_router)
         .merge(public_router)
-        .layer(CorsLayer::permissive());
+        .layer(security_headers);
 
     let addr = SocketAddr::from(([0, 0, 0, 0], args.port));
     println!("Listening on {}", addr);
 
     let listener = tokio::net::TcpListener::bind(addr).await?;
-    axum::serve(listener, app).await?;
+    axum::serve(listener, app.into_make_service_with_connect_info::<SocketAddr>()).await?;
 
     Ok(())
 }
 
 fn create_session_token(secret: &str, username: &str) -> String {
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
     let mut mac = HmacSha256::new_from_slice(secret.as_bytes()).unwrap();
-    let payload = format!("astral:{}:{}", username, "session");
+    let payload = format!("astral:{}:session:{}", username, now);
     mac.update(payload.as_bytes());
-    hex::encode(mac.finalize().into_bytes())
+    let sig = hex::encode(mac.finalize().into_bytes());
+    format!("{}.{}", now, sig)
 }
 
 fn verify_session_token(secret: &str, username: &str, token: &str) -> bool {
-    let expected = create_session_token(secret, username);
-    expected == token
+    let parts: Vec<&str> = token.splitn(2, '.').collect();
+    if parts.len() != 2 {
+        return false;
+    }
+    let timestamp: u64 = match parts[0].parse() {
+        Ok(t) => t,
+        Err(_) => return false,
+    };
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+    if now.saturating_sub(timestamp) > SESSION_MAX_AGE_SECS {
+        return false;
+    }
+    let mut mac = HmacSha256::new_from_slice(secret.as_bytes()).unwrap();
+    let payload = format!("astral:{}:session:{}", username, timestamp);
+    mac.update(payload.as_bytes());
+    let sig_bytes = match hex::decode(parts[1]) {
+        Ok(b) => b,
+        Err(_) => return false,
+    };
+    mac.verify_slice(&sig_bytes).is_ok()
 }
 
 #[derive(serde::Deserialize)]
@@ -190,11 +275,24 @@ struct LoginResponse {
     username: String,
 }
 
-fn handle_login(
+async fn handle_login(
     Json(body): Json<LoginRequest>,
     config: AuthConfig,
+    limiter: LoginLimiter,
+    addr: SocketAddr,
 ) -> Response {
-    if body.username == config.username && body.password == config.password {
+    if !limiter.check_rate_limit(addr.ip()).await {
+        return (StatusCode::TOO_MANY_REQUESTS, "Too many login attempts").into_response();
+    }
+
+    let password_ok = match PasswordHash::new(&config.password_hash) {
+        Ok(parsed) => Argon2::default()
+            .verify_password(body.password.as_bytes(), &parsed)
+            .is_ok(),
+        Err(_) => false,
+    };
+
+    if body.username == config.username && password_ok {
         let token = create_session_token(&config.secret, &body.username);
         let resp = LoginResponse {
             token,
@@ -202,7 +300,7 @@ fn handle_login(
         };
         Json(resp).into_response()
     } else {
-        println!("Failed login attempt for user: {}", body.username);
+        tracing::warn!("Failed login attempt for user: {}", body.username);
         StatusCode::UNAUTHORIZED.into_response()
     }
 }
@@ -247,4 +345,158 @@ async fn static_handler(axum::extract::Path(path): axum::extract::Path<String>) 
 
 async fn index_handler() -> impl IntoResponse {
     static_handler(axum::extract::Path("index.html".to_string())).await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // --- Session Token Tests ---
+
+    #[test]
+    fn test_token_format_is_timestamp_dot_hmac() {
+        let token = create_session_token("secret", "admin");
+        let parts: Vec<&str> = token.splitn(2, '.').collect();
+        assert_eq!(parts.len(), 2, "Token should be timestamp.hmac");
+        assert!(parts[0].parse::<u64>().is_ok(), "First part should be a u64 timestamp");
+        assert_eq!(parts[1].len(), 64, "HMAC-SHA256 hex should be 64 chars");
+    }
+
+    #[test]
+    fn test_verify_accepts_valid_token() {
+        let secret = "test_secret";
+        let token = create_session_token(secret, "admin");
+        assert!(verify_session_token(secret, "admin", &token));
+    }
+
+    #[test]
+    fn test_verify_rejects_wrong_secret() {
+        let token = create_session_token("secret_a", "admin");
+        assert!(!verify_session_token("secret_b", "admin", &token));
+    }
+
+    #[test]
+    fn test_verify_rejects_wrong_username() {
+        let secret = "test_secret";
+        let token = create_session_token(secret, "admin");
+        assert!(!verify_session_token(secret, "attacker", &token));
+    }
+
+    #[test]
+    fn test_verify_rejects_tampered_signature() {
+        let secret = "test_secret";
+        let token = create_session_token(secret, "admin");
+        let parts: Vec<&str> = token.splitn(2, '.').collect();
+        let tampered = format!("{}.{}", parts[0], "a".repeat(64));
+        assert!(!verify_session_token(secret, "admin", &tampered));
+    }
+
+    #[test]
+    fn test_verify_rejects_expired_token() {
+        let secret = "test_secret";
+        // Forge a token with a timestamp from long ago
+        let old_ts: u64 = 1000;
+        let mut mac = HmacSha256::new_from_slice(secret.as_bytes()).unwrap();
+        mac.update(format!("astral:admin:session:{}", old_ts).as_bytes());
+        let sig = hex::encode(mac.finalize().into_bytes());
+        let expired_token = format!("{}.{}", old_ts, sig);
+        assert!(!verify_session_token(secret, "admin", &expired_token));
+    }
+
+    #[test]
+    fn test_verify_rejects_malformed_tokens() {
+        let secret = "s";
+        assert!(!verify_session_token(secret, "u", ""));
+        assert!(!verify_session_token(secret, "u", "no_dot"));
+        assert!(!verify_session_token(secret, "u", "."));
+        assert!(!verify_session_token(secret, "u", "notanumber.abc"));
+        assert!(!verify_session_token(secret, "u", "123.not_hex_$$"));
+    }
+
+    #[test]
+    fn test_different_users_get_different_tokens() {
+        let secret = "shared_secret";
+        let t1 = create_session_token(secret, "alice");
+        let t2 = create_session_token(secret, "bob");
+        // Signatures will differ even if timestamps happen to match
+        let sig1 = t1.splitn(2, '.').nth(1).unwrap();
+        let sig2 = t2.splitn(2, '.').nth(1).unwrap();
+        assert_ne!(sig1, sig2);
+    }
+
+    // --- Rate Limiter Tests ---
+
+    #[tokio::test]
+    async fn test_limiter_allows_under_limit() {
+        let limiter = LoginLimiter::new();
+        let ip: std::net::IpAddr = "10.0.0.1".parse().unwrap();
+        for _ in 0..MAX_LOGIN_ATTEMPTS {
+            assert!(limiter.check_rate_limit(ip).await);
+        }
+    }
+
+    #[tokio::test]
+    async fn test_limiter_blocks_over_limit() {
+        let limiter = LoginLimiter::new();
+        let ip: std::net::IpAddr = "10.0.0.1".parse().unwrap();
+        for _ in 0..MAX_LOGIN_ATTEMPTS {
+            limiter.check_rate_limit(ip).await;
+        }
+        assert!(!limiter.check_rate_limit(ip).await, "Should block after max attempts");
+    }
+
+    #[tokio::test]
+    async fn test_limiter_isolates_by_ip() {
+        let limiter = LoginLimiter::new();
+        let ip1: std::net::IpAddr = "10.0.0.1".parse().unwrap();
+        let ip2: std::net::IpAddr = "10.0.0.2".parse().unwrap();
+        // Exhaust ip1
+        for _ in 0..MAX_LOGIN_ATTEMPTS {
+            limiter.check_rate_limit(ip1).await;
+        }
+        assert!(!limiter.check_rate_limit(ip1).await);
+        // ip2 should still be allowed
+        assert!(limiter.check_rate_limit(ip2).await);
+    }
+
+    // --- Password Hashing Tests ---
+
+    #[test]
+    fn test_argon2_hash_and_verify() {
+        let password = "correct_password";
+        let salt = SaltString::generate(&mut OsRng);
+        let hash = Argon2::default()
+            .hash_password(password.as_bytes(), &salt)
+            .unwrap()
+            .to_string();
+
+        let parsed = PasswordHash::new(&hash).unwrap();
+        assert!(Argon2::default().verify_password(password.as_bytes(), &parsed).is_ok());
+    }
+
+    #[test]
+    fn test_argon2_rejects_wrong_password() {
+        let salt = SaltString::generate(&mut OsRng);
+        let hash = Argon2::default()
+            .hash_password(b"correct", &salt)
+            .unwrap()
+            .to_string();
+
+        let parsed = PasswordHash::new(&hash).unwrap();
+        assert!(Argon2::default().verify_password(b"wrong", &parsed).is_err());
+    }
+
+    #[test]
+    fn test_argon2_different_salts_produce_different_hashes() {
+        let password = b"same_password";
+        let h1 = Argon2::default()
+            .hash_password(password, &SaltString::generate(&mut OsRng))
+            .unwrap()
+            .to_string();
+        let h2 = Argon2::default()
+            .hash_password(password, &SaltString::generate(&mut OsRng))
+            .unwrap()
+            .to_string();
+        assert_ne!(h1, h2);
+    }
 }

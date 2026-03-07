@@ -29,9 +29,9 @@ Running `./benchmark.sh` on a standard development environment:
 
 | Metric | Value |
 | :--- | :--- |
-| **Binary Size** | 3.6M (3761056 bytes) |
-| **Execution Time** | 0.17ms (Time to Ready) |
-| **Peak Memory (RSS)** | 5.75 MB |
+| **Binary Size** | 7.1M (7362848 bytes) |
+| **Execution Time** | 1.53ms (Time to Ready) |
+| **Peak Memory (RSS)** | 8.88 MB |
 
 ## Installation
 
