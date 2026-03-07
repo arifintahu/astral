@@ -50,7 +50,7 @@ while True:
             print(f"{end_time - start_time:.4f}")
             sys.exit(0)
         sock.close()
-    except:
+    except Exception:
         pass
     
     if time.time() - start_time > timeout:
