@@ -13,14 +13,54 @@ Astral provides a modern, single-page web UI that displays real-time system heal
 -   **Alerting:** Configurable webhook alerts for high CPU or Memory usage (sustained for 5 minutes).
 -   **Lightweight:** Minimal resource footprint, designed for small to medium-sized VPS and servers.
 
-## Prerequisites
+## Installation
+
+### Download Binary
+
+Pre-built binaries for Linux (amd64), Windows (amd64), and macOS (Apple Silicon) are available on the [Releases](https://github.com/yourusername/astral/releases) page.
+
+1.  Download the latest release for your platform.
+2.  Make the binary executable (Linux/macOS):
+    ```bash
+    chmod +x astral-linux-amd64
+    ```
+3.  Run it:
+    ```bash
+    ./astral-linux-amd64
+    ```
+
+### Docker Deployment
+
+For production environments, deploying via Docker ensures a consistent runtime and easy updates.
+
+The provided `docker-compose.yml` is configured to run Astral with host networking and PID access, allowing it to monitor the host system accurately.
+
+1.  **Configure Environment (Optional):**
+    Copy the example configuration file and customize settings (port, auth, alerts, etc.):
+    ```bash
+    cp docker.env.example .env
+    # Edit .env with your preferred text editor
+    ```
+
+2.  **Start the Service:**
+    ```bash
+    docker-compose up -d --build
+    ```
+
+3.  **Access the Dashboard:**
+    Open `http://<your-server-ip>:8080`.
+    
+    *Default credentials (if not changed in .env): `admin:secret`*
+
+**Important Notes:**
+-   **Host Monitoring:** Astral requires `--network host` and `--pid host` (along with `/proc` and `/sys` mounts) to accurately monitor the host system's CPU, memory, and network usage from within a container. Without these, it will only monitor the container's isolated environment.
+-   **Data Persistence:** The SQLite database is stored in `/app/data` inside the container. Use a volume (e.g., `astral_data`) to persist historical data across restarts.
+
+### Build from Source
 
 To build Astral from source, you need:
-
 -   **Rust:** Latest stable version (install via [rustup](https://rustup.rs/)).
--   **Node.js & npm:** For building the frontend assets (only required for build).
-
-## Installation
+-   **Node.js & npm:** For building the frontend assets.
 
 1.  **Clone the repository:**
     ```bash
@@ -36,7 +76,7 @@ To build Astral from source, you need:
     cd ..
     ```
 
-3.  **Run the Backend:**
+3.  **Build & Run the Backend:**
     ```bash
     cargo run --release
     ```
@@ -44,7 +84,7 @@ To build Astral from source, you need:
     Or build a release binary:
     ```bash
     cargo build --release
-    ./target/release/astral
+    # Binary will be at target/release/astral
     ```
 
 ## Usage
@@ -99,29 +139,6 @@ To run the project in development mode:
     cargo run
     ```
 
-## Docker Deployment
+## License
 
-For production environments, deploying via Docker ensures a consistent runtime and easy updates.
-
-The provided `docker-compose.yml` is configured to run Astral with host networking and PID access, allowing it to monitor the host system accurately.
-
-1.  **Configure Environment (Optional):**
-    Copy the example configuration file and customize settings (port, auth, alerts, etc.):
-    ```bash
-    cp docker.env.example .env
-    # Edit .env with your preferred text editor
-    ```
-
-2.  **Start the Service:**
-    ```bash
-    docker-compose up -d --build
-    ```
-
-3.  **Access the Dashboard:**
-    Open `http://<your-server-ip>:8080`.
-    
-    *Default credentials (if not changed in .env): `admin:secret`*
-
-**Important Notes:**
--   **Host Monitoring:** Astral requires `--network host` and `--pid host` (along with `/proc` and `/sys` mounts) to accurately monitor the host system's CPU, memory, and network usage from within a container. Without these, it will only monitor the container's isolated environment.
--   **Data Persistence:** The SQLite database is stored in `/app/data` inside the container. Use a volume (e.g., `astral_data`) to persist historical data across restarts.
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
