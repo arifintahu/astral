@@ -3,7 +3,6 @@
   import uPlot from 'uplot';
   import 'uplot/dist/uPlot.min.css';
 
-  let { token }: { token: string } = $props();
 
   let window = $state('6h');
   let chartContainer: HTMLDivElement;
@@ -22,9 +21,8 @@
   async function fetchData() {
     try {
         isLoading = true;
-        const res = await fetch(`/api/history?window=${window}`, {
-            headers: token ? { 'Authorization': `Bearer ${token}` } : {},
-        });
+        // M-1: Session cookie is sent automatically by the browser for same-origin requests.
+        const res = await fetch(`/api/history?window=${window}`);
         if (!res.ok) return;
         const data = await res.json();
 

@@ -331,30 +331,32 @@ if alert_triggered && now - self.last_alert_at > ALERT_COOLDOWN_SECS {
 
 ## Summary Table
 
-| ID  | Severity     | File                    | Issue                                              |
-|-----|--------------|-------------------------|----------------------------------------------------|
-| C-1 | **Critical** | `src/main.rs:107`       | Password exposed in CLI argument / process list    |
-| C-2 | **Critical** | `src/main.rs:219`       | No TLS — credentials transmitted in plaintext      |
-| H-1 | **High**     | `src/main.rs:228`       | No nonce in session token — identical tokens possible |
-| H-2 | **High**     | `src/main.rs:308`       | No server-side session revocation                  |
-| H-3 | **High**     | `src/main.rs:205`       | Missing Content-Security-Policy header             |
-| H-4 | **High**     | `src/worker.rs:163`     | Webhook URL not validated — SSRF risk              |
-| H-5 | **High**     | `src/main.rs:73`        | Rate limiter HashMap unbounded — memory exhaustion |
-| M-1 | **Medium**   | `Login.svelte:22`       | Auth token in sessionStorage (XSS-stealable)       |
-| M-2 | **Medium**   | `src/main.rs:107`       | Colon in password causes opaque startup failure    |
-| M-3 | **Medium**   | `src/main.rs:115`       | Generated credentials printed to stdout/logs       |
-| M-4 | **Medium**   | `src/worker.rs:170`     | No timeout on webhook HTTP client                  |
-| M-5 | **Medium**   | `src/metrics.rs:104`    | Full process list streamed to all authenticated clients |
-| L-1 | **Low**      | `src/main.rs:120`       | `unwrap()`/`expect()` in crypto paths can crash server |
-| L-2 | **Low**      | `src/main.rs:134`       | SQLite missing WAL mode                            |
-| L-3 | **Low**      | `src/main.rs:205`       | Missing `Strict-Transport-Security` header         |
-| L-4 | **Low**      | `src/worker.rs:106`     | No alert cooldown — alert flood on sustained high load |
+| ID  | Severity     | File                    | Issue                                              | Status |
+|-----|--------------|-------------------------|----------------------------------------------------|--------|
+| C-1 | **Critical** | `src/main.rs:107`       | Password exposed in CLI argument / process list    | ✅ Fixed — `env = "ASTRAL_AUTH"` added; `split_once` used |
+| C-2 | **Critical** | `src/main.rs:219`       | No TLS — credentials transmitted in plaintext      | ⚠️ Deployment — TLS must be terminated at reverse proxy (nginx/Caddy); HSTS header added |
+| H-1 | **High**     | `src/main.rs:228`       | No nonce in session token — identical tokens possible | ✅ Fixed — token format changed to `{ts}.{nonce}.{hmac}` |
+| H-2 | **High**     | `src/main.rs:308`       | No server-side session revocation                  | ✅ Fixed — `RevocationSet` + `POST /api/logout` endpoint |
+| H-3 | **High**     | `src/main.rs:205`       | Missing Content-Security-Policy header             | ✅ Fixed — CSP header added to security middleware |
+| H-4 | **High**     | `src/worker.rs:163`     | Webhook URL not validated — SSRF risk              | ✅ Fixed — `https://` scheme required; HTTP rejected |
+| H-5 | **High**     | `src/main.rs:73`        | Rate limiter HashMap unbounded — memory exhaustion | ✅ Fixed — background eviction task every 5 minutes |
+| M-1 | **Medium**   | `Login.svelte:22`       | Auth token in sessionStorage (XSS-stealable)       | ✅ Fixed — `HttpOnly; SameSite=Strict` cookie; `sessionStorage` removed |
+| M-2 | **Medium**   | `src/main.rs:107`       | Colon in password causes opaque startup failure    | ✅ Fixed — `split_once(':')` replaces `split(':').collect()` |
+| M-3 | **Medium**   | `src/main.rs:115`       | Generated credentials printed to stdout/logs       | ✅ Fixed — credentials written to `stderr` with save warning |
+| M-4 | **Medium**   | `src/worker.rs:170`     | No timeout on webhook HTTP client                  | ✅ Fixed — `reqwest::ClientBuilder::timeout(10s)` |
+| M-5 | **Medium**   | `src/metrics.rs:104`    | Full process list streamed to all authenticated clients | ✅ Fixed — opt-in via `--enable-process-list` flag (default off) |
+| L-1 | **Low**      | `src/main.rs:120`       | `unwrap()`/`expect()` in crypto paths can crash server | ✅ Fixed — `.map_err(...)?` propagation in `main()` |
+| L-2 | **Low**      | `src/main.rs:134`       | SQLite missing WAL mode                            | ✅ Fixed — `PRAGMA journal_mode=WAL` in `Db::init()` |
+| L-3 | **Low**      | `src/main.rs:205`       | Missing `Strict-Transport-Security` header         | ✅ Fixed — HSTS header added to security middleware |
+| L-4 | **Low**      | `src/worker.rs:106`     | No alert cooldown — alert flood on sustained high load | ✅ Fixed — 15-minute per-kind cooldown on `Worker` |
+
+**15 of 16 findings fixed in code. C-2 requires a reverse proxy with TLS — not addressable in the binary itself.**
 
 ---
 
 ## Remediation Priority
 
-1. **Immediate (before any network exposure):** C-1, C-2 — without these, all other controls are undermined
-2. **Before first production deployment:** H-1, H-2, H-3, H-4, H-5, M-1
-3. **Next sprint:** M-2, M-3, M-4, M-5
-4. **Backlog / hardening:** L-1, L-2, L-3, L-4
+1. **Immediate (before any network exposure):** C-1 ✅, C-2 ⚠️ — without these, all other controls are undermined
+2. **Before first production deployment:** H-1 ✅, H-2 ✅, H-3 ✅, H-4 ✅, H-5 ✅, M-1 ✅
+3. **Next sprint:** M-2 ✅, M-3 ✅, M-4 ✅, M-5 ✅
+4. **Backlog / hardening:** L-1 ✅, L-2 ✅, L-3 ✅, L-4 ✅

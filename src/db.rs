@@ -35,6 +35,9 @@ impl Db {
     }
 
     async fn init(&self) -> Result<()> {
+        // L-2: Enable WAL mode — concurrent reads no longer block on writes.
+        sqlx::query("PRAGMA journal_mode=WAL").execute(&self.pool).await?;
+
         let tables = ["metrics_1m", "metrics_5m", "metrics_15m", "metrics_1h"];
         for table in tables {
             let table = validate_table(table)?;
