@@ -17,28 +17,22 @@
   let rxHistory: number[] = $state([]);
   let alerts: AlertEvent[] = $state([]);
   let authenticated = $state(false);
-  let token = $state('');
   let refreshRate = $state(1);
   let lastUpdate = $state(0);
 
   let eventSource: EventSource | null = null;
   let alertSource: EventSource | null = null;
 
-  function getToken(): string {
-    return sessionStorage.getItem('astral_token') || '';
-  }
-
-  function handleLogin(newToken: string) {
-    token = newToken;
+  function handleLogin() {
+    // M-1: Token is an HttpOnly cookie set by the server — nothing to store client-side.
     authenticated = true;
     connectStreams();
   }
 
-  function handleLogout() {
-    sessionStorage.removeItem('astral_token');
-    sessionStorage.removeItem('astral_user');
+  async function handleLogout() {
+    // H-2: Revoke the session server-side before clearing local state.
+    await fetch('/api/logout', { method: 'POST' }).catch(() => {});
     authenticated = false;
-    token = '';
     metrics = null;
     cpuHistory = [];
     txHistory = [];
@@ -65,25 +59,15 @@
   }
 
   function connectStreams() {
-    const t = getToken();
-
-    // Metrics SSE — use polling via fetch with auth header since EventSource doesn't support custom headers
-    // We'll use a polling approach with fetch for authenticated SSE
-    const metricsUrl = '/api/stream';
-    const alertsUrl = '/api/alerts';
-
-    // For SSE with auth, we need to use fetch-based EventSource or pass token via query
-    // Since standard EventSource doesn't support headers, we use a fetch-based approach
-    startMetricsStream(t);
-    startAlertStream(t);
+    startMetricsStream();
+    startAlertStream();
   }
 
-  function startMetricsStream(authToken: string) {
-    // Use fetch with ReadableStream for SSE with auth headers
+  function startMetricsStream() {
+    // M-1: Session cookie is sent automatically for same-origin requests — no auth header needed.
     const abortController = new AbortController();
 
     fetch('/api/stream', {
-      headers: { 'Authorization': `Bearer ${authToken}` },
       signal: abortController.signal,
     }).then(response => {
       if (!response.ok) {
@@ -133,7 +117,7 @@
         console.error('Metrics stream error:', e);
         // Retry after 3s
         setTimeout(() => {
-          if (authenticated) startMetricsStream(authToken);
+          if (authenticated) startMetricsStream();
         }, 3000);
       }
     });
@@ -142,11 +126,10 @@
     eventSource = { close: () => abortController.abort() } as any;
   }
 
-  function startAlertStream(authToken: string) {
+  function startAlertStream() {
     const abortController = new AbortController();
 
     fetch('/api/alerts', {
-      headers: { 'Authorization': `Bearer ${authToken}` },
       signal: abortController.signal,
     }).then(response => {
       if (!response.ok) return;
@@ -181,7 +164,7 @@
     }).catch(e => {
       if (e.name !== 'AbortError') {
         setTimeout(() => {
-          if (authenticated) startAlertStream(authToken);
+          if (authenticated) startAlertStream();
         }, 5000);
       }
     });
@@ -190,25 +173,14 @@
   }
 
   onMount(() => {
-    // Check if we have a stored session
-    const storedToken = sessionStorage.getItem('astral_token');
-    if (storedToken) {
-      // Validate the token
-      fetch('/api/auth/check', {
-        headers: { 'Authorization': `Bearer ${storedToken}` },
-      }).then(res => {
-        if (res.ok) {
-          token = storedToken;
-          authenticated = true;
-          connectStreams();
-        } else {
-          sessionStorage.removeItem('astral_token');
-          sessionStorage.removeItem('astral_user');
-        }
-      }).catch(() => {
-        // If we can't reach server, show login
-      });
-    }
+    // M-1: Check for an active session via cookie — no sessionStorage lookup needed.
+    fetch('/api/auth/check').then(res => {
+      if (res.ok) {
+        authenticated = true;
+        connectStreams();
+      }
+    }).catch(() => {});
+
 
     return () => {
       if (eventSource) eventSource.close();
@@ -253,7 +225,7 @@
 
       <div class="grid grid-cols-1 xl:grid-cols-3 gap-4 md:gap-5 mt-5 h-[26rem]">
         <div class="xl:col-span-2 animate-fade-in-up stagger-5 h-full">
-          <HistoryChart {token} />
+          <HistoryChart />
         </div>
         <div class="animate-fade-in-up h-full" style="animation-delay: 0.35s">
           <ProcessList processes={metrics.processes} totalMemory={metrics.total_memory} />

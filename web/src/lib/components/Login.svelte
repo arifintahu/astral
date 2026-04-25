@@ -1,5 +1,5 @@
 <script lang="ts">
-  let { onLogin }: { onLogin: (token: string) => void } = $props();
+  let { onLogin }: { onLogin: () => void } = $props();
 
   let username = $state('');
   let password = $state('');
@@ -19,10 +19,8 @@
       });
 
       if (res.ok) {
-        const data = await res.json();
-        sessionStorage.setItem('astral_token', data.token);
-        sessionStorage.setItem('astral_user', data.username);
-        onLogin(data.token);
+        // M-1: Token is delivered as an HttpOnly cookie by the server; nothing to store.
+        onLogin();
       } else {
         error = 'Invalid credentials';
       }

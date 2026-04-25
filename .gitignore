@@ -2,3 +2,5 @@
 *.db
 *.log
 wait_for_port.py
+astral.db*
+.env

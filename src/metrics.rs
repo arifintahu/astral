@@ -63,7 +63,6 @@ impl MetricsCollector {
 
         // Initial refresh
         system.refresh_all();
-        system.refresh_processes(ProcessesToUpdate::All, true);
 
         Self {
             system,
@@ -72,9 +71,8 @@ impl MetricsCollector {
         }
     }
 
-    pub fn collect(&mut self) -> SystemMetrics {
+    pub fn collect(&mut self, enable_process_list: bool) -> SystemMetrics {
         self.system.refresh_all();
-        self.system.refresh_processes(ProcessesToUpdate::All, true);
         self.networks.refresh(true);
         self.disks.refresh(true);
 
@@ -100,19 +98,23 @@ impl MetricsCollector {
             }
         }).collect();
 
-        // Collect top processes by CPU + memory
-        let mut procs: Vec<ProcessInfo> = self.system.processes().iter().map(|(pid, proc_)| {
-            ProcessInfo {
-                pid: pid.as_u32(),
-                name: proc_.name().to_string_lossy().to_string(),
-                cpu_usage: proc_.cpu_usage(),
-                memory: proc_.memory(),
-            }
-        }).collect();
-
-        // Sort by CPU usage descending, take top 10
-        procs.sort_by(|a, b| b.cpu_usage.partial_cmp(&a.cpu_usage).unwrap_or(std::cmp::Ordering::Equal));
-        procs.truncate(15);
+        // M-5: Process list is opt-in — collect only when --enable-process-list is set.
+        let procs = if enable_process_list {
+            self.system.refresh_processes(ProcessesToUpdate::All, true);
+            let mut p: Vec<ProcessInfo> = self.system.processes().iter().map(|(pid, proc_)| {
+                ProcessInfo {
+                    pid: pid.as_u32(),
+                    name: proc_.name().to_string_lossy().to_string(),
+                    cpu_usage: proc_.cpu_usage(),
+                    memory: proc_.memory(),
+                }
+            }).collect();
+            p.sort_by(|a, b| b.cpu_usage.partial_cmp(&a.cpu_usage).unwrap_or(std::cmp::Ordering::Equal));
+            p.truncate(15);
+            p
+        } else {
+            vec![]
+        };
 
         SystemMetrics {
             hostname: System::host_name().unwrap_or_default(),
@@ -135,14 +137,14 @@ impl MetricsCollector {
 
 pub async fn run_metrics_collector(
     tx: broadcast::Sender<SystemMetrics>,
+    enable_process_list: bool,
 ) {
     let mut collector = MetricsCollector::new();
     let mut interval = interval(Duration::from_secs(1));
 
     loop {
         interval.tick().await;
-        let metrics = collector.collect();
-        // Ignore error if no active subscribers
+        let metrics = collector.collect(enable_process_list);
         let _ = tx.send(metrics);
     }
 }
