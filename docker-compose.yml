@@ -19,6 +19,9 @@ services:
     # but usually read-only mounts are sufficient.
     # privileged: true
 
+    env_file:
+      - .env
+
     environment:
       - RUST_LOG=info
       # Customize these environment variables as needed
@@ -42,14 +45,13 @@ services:
     # Pass arguments to the binary, using environment variables with defaults
     # Note: We bind to 0.0.0.0 explicitly to ensure it's accessible from outside the container
     command: >
-      sh -c "export HOST_PROC=/host/proc && 
-      export HOST_SYS=/host/sys && 
-      ./astral 
-      --port $${ASTRAL_PORT:-8080} 
-      --auth $${ASTRAL_AUTH:-admin:secret} 
-      --retention $${ASTRAL_RETENTION:-7} 
-      --alert-cpu $${ASTRAL_ALERT_CPU:-90} 
-      --alert-ram $${ASTRAL_ALERT_RAM:-90} 
+      sh -c "export HOST_PROC=/host/proc &&
+      export HOST_SYS=/host/sys &&
+      ./astral
+      --port $${ASTRAL_PORT:-8080}
+      --retention $${ASTRAL_RETENTION:-7}
+      --alert-cpu $${ASTRAL_ALERT_CPU:-90}
+      --alert-ram $${ASTRAL_ALERT_RAM:-90}
       $${ASTRAL_WEBHOOK:+--webhook $$ASTRAL_WEBHOOK}"
 
 volumes:
