@@ -84,7 +84,7 @@ To build Astral from source, you need:
 
 1.  **Clone the repository:**
     ```bash
-    git clone https://github.com/yourusername/astral.git
+    git clone https://github.com/arifintahu/astral.git
     cd astral
     ```
 
