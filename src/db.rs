@@ -24,6 +24,8 @@ pub struct MetricPoint {
     pub used_memory: i64,
     pub network_tx: i64,
     pub network_rx: i64,
+    pub disk_read_rate: i64,
+    pub disk_write_rate: i64,
 }
 
 impl Db {
@@ -35,7 +37,6 @@ impl Db {
     }
 
     async fn init(&self) -> Result<()> {
-        // L-2: Enable WAL mode — concurrent reads no longer block on writes.
         sqlx::query("PRAGMA journal_mode=WAL").execute(&self.pool).await?;
 
         let tables = ["metrics_1m", "metrics_5m", "metrics_15m", "metrics_1h"];
@@ -47,12 +48,28 @@ impl Db {
                     cpu_usage REAL,
                     used_memory INTEGER,
                     network_tx INTEGER,
-                    network_rx INTEGER
+                    network_rx INTEGER,
+                    disk_read_rate INTEGER DEFAULT 0,
+                    disk_write_rate INTEGER DEFAULT 0
                 )",
                 table
             ))
             .execute(&self.pool)
             .await?;
+
+            // Idempotent migration: add new columns to existing tables if missing.
+            let _ = sqlx::query(&format!(
+                "ALTER TABLE {} ADD COLUMN disk_read_rate INTEGER DEFAULT 0",
+                table
+            ))
+            .execute(&self.pool)
+            .await;
+            let _ = sqlx::query(&format!(
+                "ALTER TABLE {} ADD COLUMN disk_write_rate INTEGER DEFAULT 0",
+                table
+            ))
+            .execute(&self.pool)
+            .await;
         }
         Ok(())
     }
@@ -60,7 +77,9 @@ impl Db {
     pub async fn insert_metric(&self, table: &str, metric: MetricPoint) -> Result<()> {
         let table = validate_table(table)?;
         let query = format!(
-            "INSERT OR REPLACE INTO {} (timestamp, cpu_usage, used_memory, network_tx, network_rx) VALUES (?, ?, ?, ?, ?)",
+            "INSERT OR REPLACE INTO {} \
+             (timestamp, cpu_usage, used_memory, network_tx, network_rx, disk_read_rate, disk_write_rate) \
+             VALUES (?, ?, ?, ?, ?, ?, ?)",
             table
         );
         sqlx::query(&query)
@@ -69,6 +88,8 @@ impl Db {
             .bind(metric.used_memory)
             .bind(metric.network_tx)
             .bind(metric.network_rx)
+            .bind(metric.disk_read_rate)
+            .bind(metric.disk_write_rate)
             .execute(&self.pool)
             .await?;
         Ok(())
@@ -77,7 +98,10 @@ impl Db {
     pub async fn get_history(&self, table: &str, start_ts: i64) -> Result<Vec<MetricPoint>> {
         let table = validate_table(table)?;
         let query = format!(
-            "SELECT timestamp, cpu_usage, used_memory, network_tx, network_rx FROM {} WHERE timestamp >= ? ORDER BY timestamp ASC",
+            "SELECT timestamp, cpu_usage, used_memory, network_tx, network_rx, \
+             COALESCE(disk_read_rate, 0) as disk_read_rate, \
+             COALESCE(disk_write_rate, 0) as disk_write_rate \
+             FROM {} WHERE timestamp >= ? ORDER BY timestamp ASC",
             table
         );
         let rows = sqlx::query_as::<_, MetricPoint>(&query)
@@ -99,40 +123,51 @@ impl Db {
     pub async fn get_average(&self, table: &str, start_ts: i64) -> Result<Option<MetricPoint>> {
         let table = validate_table(table)?;
         let query = format!(
-            "SELECT 
-                AVG(cpu_usage) as cpu_usage, 
-                CAST(AVG(used_memory) as INTEGER) as used_memory, 
-                CAST(AVG(network_tx) as INTEGER) as network_tx, 
-                CAST(AVG(network_rx) as INTEGER) as network_rx 
+            "SELECT
+                AVG(cpu_usage) as cpu_usage,
+                CAST(AVG(used_memory) as INTEGER) as used_memory,
+                CAST(AVG(network_tx) as INTEGER) as network_tx,
+                CAST(AVG(network_rx) as INTEGER) as network_rx,
+                CAST(AVG(COALESCE(disk_read_rate, 0)) as INTEGER) as disk_read_rate,
+                CAST(AVG(COALESCE(disk_write_rate, 0)) as INTEGER) as disk_write_rate
             FROM {} WHERE timestamp >= ?",
             table
         );
-        
-        let row: (Option<f64>, Option<i64>, Option<i64>, Option<i64>) = sqlx::query_as(&query)
-            .bind(start_ts)
-            .fetch_one(&self.pool)
-            .await?;
-            
-        if let (Some(cpu), Some(mem), Some(tx), Some(rx)) = row {
-             Ok(Some(MetricPoint {
-                 timestamp: start_ts, // This timestamp marks the start of the window
-                 cpu_usage: cpu,
-                 used_memory: mem,
-                 network_tx: tx,
-                 network_rx: rx,
-             }))
+
+        let row: (Option<f64>, Option<i64>, Option<i64>, Option<i64>, Option<i64>, Option<i64>) =
+            sqlx::query_as(&query)
+                .bind(start_ts)
+                .fetch_one(&self.pool)
+                .await?;
+
+        if let (Some(cpu), Some(mem), Some(tx), Some(rx), Some(dr), Some(dw)) = row {
+            Ok(Some(MetricPoint {
+                timestamp: start_ts,
+                cpu_usage: cpu,
+                used_memory: mem,
+                network_tx: tx,
+                network_rx: rx,
+                disk_read_rate: dr,
+                disk_write_rate: dw,
+            }))
         } else {
             Ok(None)
         }
     }
 
-    pub async fn check_alert_condition(&self, table: &str, threshold_cpu: f64, threshold_mem: i64, duration_seconds: i64) -> Result<bool> {
+    pub async fn check_alert_condition(
+        &self,
+        table: &str,
+        threshold_cpu: f64,
+        threshold_mem: i64,
+        duration_seconds: i64,
+    ) -> Result<bool> {
         let table = validate_table(table)?;
         let now = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs() as i64;
         let start_ts = now - duration_seconds;
-        
+
         let query = format!(
-            "SELECT 
+            "SELECT
                 COUNT(*) as total,
                 COALESCE(SUM(CASE WHEN cpu_usage > ? THEN 1 ELSE 0 END), 0) as high_cpu,
                 COALESCE(SUM(CASE WHEN used_memory > ? THEN 1 ELSE 0 END), 0) as high_mem
@@ -146,17 +181,17 @@ impl Db {
             .bind(start_ts)
             .fetch_one(&self.pool)
             .await?;
-            
+
         let (total, high_cpu, high_mem) = row;
-        
+
         if total == 0 {
             return Ok(false);
         }
-        
+
         if total >= 5 && (high_cpu == total || high_mem == total) {
             return Ok(true);
         }
-        
+
         Ok(false)
     }
 }

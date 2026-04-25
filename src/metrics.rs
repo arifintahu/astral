@@ -3,6 +3,8 @@ use sysinfo::{CpuRefreshKind, Disks, MemoryRefreshKind, Networks, ProcessesToUpd
 use tokio::sync::broadcast;
 use tokio::time::{interval, Duration};
 
+use crate::config::SharedConfig;
+
 #[derive(Debug, Clone, Serialize)]
 pub struct SystemMetrics {
     pub hostname: String,
@@ -47,12 +49,6 @@ pub struct MetricsCollector {
 
 impl MetricsCollector {
     pub fn new() -> Self {
-        // sysinfo checks HOST_PROC and HOST_SYS environment variables automatically
-        // but we need to ensure they are set before System::new() if they are passed in differently
-        // In our case, we set them in docker-compose command, so they should be available.
-        // However, sysinfo might not respect them unless we use System::new_with_specifics properly or if the library version supports it.
-        // sysinfo 0.30+ respects HOST_PROC/HOST_SYS env vars on Linux.
-        
         let mut system = System::new_with_specifics(
             RefreshKind::nothing()
                 .with_cpu(CpuRefreshKind::everything())
@@ -61,14 +57,9 @@ impl MetricsCollector {
         let networks = Networks::new_with_refreshed_list();
         let disks = Disks::new_with_refreshed_list();
 
-        // Initial refresh
         system.refresh_all();
 
-        Self {
-            system,
-            networks,
-            disks,
-        }
+        Self { system, networks, disks }
     }
 
     pub fn collect(&mut self, enable_process_list: bool) -> SystemMetrics {
@@ -79,37 +70,47 @@ impl MetricsCollector {
         let cpu_usage = self.system.global_cpu_usage();
         let cpu_cores = self.system.cpus().len();
 
-        let mut network_tx = 0;
-        let mut network_rx = 0;
+        let mut network_tx = 0u64;
+        let mut network_rx = 0u64;
         for (_, network) in &self.networks {
             network_tx += network.transmitted();
             network_rx += network.received();
         }
 
-        let disks = self.disks.iter().map(|disk| {
-            let usage = disk.usage();
-            DiskInfo {
-                name: disk.name().to_string_lossy().to_string(),
-                mount_point: disk.mount_point().to_string_lossy().to_string(),
-                total_space: disk.total_space(),
-                available_space: disk.available_space(),
-                read_bytes: usage.read_bytes,
-                written_bytes: usage.written_bytes,
-            }
-        }).collect();
+        let disks = self
+            .disks
+            .iter()
+            .map(|disk| {
+                let usage = disk.usage();
+                DiskInfo {
+                    name: disk.name().to_string_lossy().to_string(),
+                    mount_point: disk.mount_point().to_string_lossy().to_string(),
+                    total_space: disk.total_space(),
+                    available_space: disk.available_space(),
+                    read_bytes: usage.read_bytes,
+                    written_bytes: usage.written_bytes,
+                }
+            })
+            .collect();
 
-        // M-5: Process list is opt-in — collect only when --enable-process-list is set.
         let procs = if enable_process_list {
             self.system.refresh_processes(ProcessesToUpdate::All, true);
-            let mut p: Vec<ProcessInfo> = self.system.processes().iter().map(|(pid, proc_)| {
-                ProcessInfo {
+            let mut p: Vec<ProcessInfo> = self
+                .system
+                .processes()
+                .iter()
+                .map(|(pid, proc_)| ProcessInfo {
                     pid: pid.as_u32(),
                     name: proc_.name().to_string_lossy().to_string(),
                     cpu_usage: proc_.cpu_usage(),
                     memory: proc_.memory(),
-                }
-            }).collect();
-            p.sort_by(|a, b| b.cpu_usage.partial_cmp(&a.cpu_usage).unwrap_or(std::cmp::Ordering::Equal));
+                })
+                .collect();
+            p.sort_by(|a, b| {
+                b.cpu_usage
+                    .partial_cmp(&a.cpu_usage)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            });
             p.truncate(15);
             p
         } else {
@@ -137,14 +138,15 @@ impl MetricsCollector {
 
 pub async fn run_metrics_collector(
     tx: broadcast::Sender<SystemMetrics>,
-    enable_process_list: bool,
+    config: SharedConfig,
 ) {
     let mut collector = MetricsCollector::new();
-    let mut interval = interval(Duration::from_secs(1));
+    let mut tick = interval(Duration::from_secs(1));
 
     loop {
-        interval.tick().await;
-        let metrics = collector.collect(enable_process_list);
+        tick.tick().await;
+        let enable = config.read().await.enable_process_list;
+        let metrics = collector.collect(enable);
         let _ = tx.send(metrics);
     }
 }

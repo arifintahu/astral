@@ -38,3 +38,21 @@ export interface AlertEvent {
     threshold: number;
     timestamp: number;
 }
+
+export interface MetricPoint {
+    timestamp: number;
+    cpu_usage: number;
+    used_memory: number;
+    network_tx: number;
+    network_rx: number;
+    disk_read_rate: number;
+    disk_write_rate: number;
+}
+
+export interface DynamicConfig {
+    enable_process_list: boolean;
+    alert_cpu: number;
+    alert_ram: number;
+    retention_days: number;
+    slack_webhook: string | null;
+}

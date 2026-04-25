@@ -22,11 +22,13 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tokio::sync::{broadcast, Mutex};
 
 mod api;
+mod config;
 mod db;
 mod metrics;
 mod worker;
 
 use api::AppState;
+use config::{DynamicConfig, SharedConfig};
 use db::Db;
 use metrics::SystemMetrics;
 use worker::Worker;
@@ -59,6 +61,10 @@ struct Args {
     /// Include the process list in the SSE stream (opt-in, defaults to off).
     #[arg(long)]
     enable_process_list: bool,
+
+    /// Slack incoming webhook URL for alert notifications.
+    #[arg(long)]
+    slack_webhook: Option<String>,
 }
 
 #[derive(RustEmbed)]
@@ -110,8 +116,6 @@ async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt::init();
     let args = Args::parse();
 
-    // C-1: Credentials readable from ASTRAL_AUTH env var (via clap `env`).
-    // M-2: Use split_once so passwords containing ':' are accepted.
     let (username, password) = if let Some(auth_str) = args.auth {
         let (u, p) = auth_str
             .split_once(':')
@@ -120,7 +124,6 @@ async fn main() -> anyhow::Result<()> {
     } else {
         let username = "admin".to_string();
         let password = uuid::Uuid::new_v4().to_string();
-        // M-3: Write to stderr so credentials are not captured by stdout log pipelines.
         eprintln!("No auth provided — generated credentials (save these now):");
         eprintln!("  Username : {}", username);
         eprintln!("  Password : {}", password);
@@ -129,7 +132,6 @@ async fn main() -> anyhow::Result<()> {
     };
 
     let salt = SaltString::generate(&mut OsRng);
-    // L-1: Use ? instead of .expect() so errors propagate via anyhow.
     let password_hash = Argon2::default()
         .hash_password(password.as_bytes(), &salt)
         .map_err(|e| anyhow::anyhow!("Failed to hash password: {}", e))?
@@ -137,15 +139,9 @@ async fn main() -> anyhow::Result<()> {
 
     let secret = uuid::Uuid::new_v4().to_string();
     let revocation: RevocationSet = Arc::new(Mutex::new(HashSet::new()));
-    let auth_config = AuthConfig {
-        username,
-        password_hash,
-        secret,
-        revocation,
-    };
+    let auth_config = AuthConfig { username, password_hash, secret, revocation };
     let limiter = LoginLimiter::new();
 
-    // H-5: Periodically evict stale rate-limit entries to prevent unbounded HashMap growth.
     let limiter_cleanup = limiter.clone();
     tokio::spawn(async move {
         let mut tick = tokio::time::interval(Duration::from_secs(300));
@@ -159,40 +155,52 @@ async fn main() -> anyhow::Result<()> {
         }
     });
 
-    // L-2: WAL mode is enabled inside Db::init() via PRAGMA journal_mode=WAL.
     let db = Db::new("sqlite:astral.db?mode=rwc").await?;
+
+    // Build dynamic config from CLI args — operators can update via POST /api/settings.
+    let dyn_config = DynamicConfig {
+        enable_process_list: args.enable_process_list,
+        alert_cpu: args.alert_cpu,
+        alert_ram: args.alert_ram,
+        retention_days: args.retention,
+        slack_webhook: args.slack_webhook,
+    };
+    let shared_config: SharedConfig = Arc::new(tokio::sync::RwLock::new(dyn_config));
 
     let (tx, _rx) = broadcast::channel::<SystemMetrics>(100);
 
-    // M-5: Process list is opt-in via --enable-process-list.
     let tx_clone = tx.clone();
-    let enable_procs = args.enable_process_list;
+    let config_for_metrics = shared_config.clone();
     tokio::spawn(async move {
-        metrics::run_metrics_collector(tx_clone, enable_procs).await;
+        metrics::run_metrics_collector(tx_clone, config_for_metrics).await;
     });
 
-    let worker_rx = tx.subscribe();
-    let worker_db = db.clone();
     let alert_tx = api::create_alert_channel();
-    let alert_tx_worker = alert_tx.clone();
+    let alert_history = api::create_alert_history();
+
     let worker = Worker::new(
-        worker_db,
-        worker_rx,
-        args.alert_cpu,
-        args.alert_ram,
+        db.clone(),
+        tx.subscribe(),
+        shared_config.clone(),
         args.webhook,
-        alert_tx_worker,
+        alert_tx.clone(),
+        alert_history.clone(),
     );
     tokio::spawn(async move {
         worker.run().await;
     });
 
-    let app_state = AppState { db, tx, alert_tx };
+    let app_state = AppState {
+        db,
+        tx,
+        alert_tx,
+        config: shared_config,
+        alert_history,
+    };
     let auth_config_clone = auth_config.clone();
 
     let api_router = api::app(app_state);
 
-    // Auth middleware — checks HttpOnly session cookie and revocation set.
     let auth_layer = middleware::from_fn(move |req: Request<Body>, next: Next| {
         let config = auth_config_clone.clone();
         async move { auth_middleware(req, next, config).await }
@@ -225,8 +233,6 @@ async fn main() -> anyhow::Result<()> {
         )
         .layer(auth_layer);
 
-    // H-3: Content-Security-Policy prevents XSS execution.
-    // L-3: Strict-Transport-Security enforces HTTPS when served behind a TLS proxy.
     let security_headers = middleware::from_fn(|req: Request<Body>, next: Next| async move {
         let mut resp = next.run(req).await;
         let h = resp.headers_mut();
@@ -260,11 +266,8 @@ async fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-/// H-1: Token format is `{timestamp}.{nonce}.{hmac}`.
-/// The nonce prevents identical tokens when two logins occur within the same second.
 fn create_session_token(secret: &str, username: &str) -> anyhow::Result<String> {
     let now = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs();
-    // Use UUID v4 as a 32-char hex nonce (128 bits of randomness).
     let nonce = uuid::Uuid::new_v4().to_string().replace('-', "");
     let mac = HmacSha256::new_from_slice(secret.as_bytes())
         .map_err(|e| anyhow::anyhow!("HMAC key error: {}", e))?;
@@ -275,7 +278,6 @@ fn create_session_token(secret: &str, username: &str) -> anyhow::Result<String> 
 }
 
 fn verify_session_token(secret: &str, username: &str, token: &str) -> bool {
-    // Expected format: {timestamp}.{nonce}.{sig}
     let parts: Vec<&str> = token.splitn(3, '.').collect();
     if parts.len() != 3 {
         return false;
@@ -305,12 +307,10 @@ fn verify_session_token(secret: &str, username: &str, token: &str) -> bool {
     mac.verify_slice(&sig_bytes).is_ok()
 }
 
-/// Extract the signature component from a session token for revocation purposes.
 fn token_sig(token: &str) -> Option<String> {
     token.splitn(3, '.').nth(2).map(|s| s.to_string())
 }
 
-/// Parse the session token from the Cookie request header.
 fn get_cookie_token(headers: &axum::http::HeaderMap) -> Option<String> {
     let cookie_str = headers.get("cookie")?.to_str().ok()?;
     for part in cookie_str.split(';') {
@@ -357,7 +357,6 @@ async fn handle_login(
                 return StatusCode::INTERNAL_SERVER_ERROR.into_response();
             }
         };
-        // M-1: Deliver token via HttpOnly cookie — inaccessible to JavaScript.
         let cookie = format!(
             "astral_session={}; HttpOnly; Path=/; SameSite=Strict; Max-Age={}",
             token, SESSION_MAX_AGE_SECS
@@ -379,7 +378,6 @@ async fn handle_login(
 }
 
 async fn handle_logout(headers: axum::http::HeaderMap, config: AuthConfig) -> Response {
-    // H-2: Add token signature to revocation set so it cannot be reused after logout.
     if let Some(token) = get_cookie_token(&headers) {
         if let Some(sig) = token_sig(&token) {
             config.revocation.lock().await.insert(sig);
@@ -392,10 +390,8 @@ async fn handle_logout(headers: axum::http::HeaderMap, config: AuthConfig) -> Re
 }
 
 async fn auth_middleware(req: Request<Body>, next: Next, config: AuthConfig) -> Response {
-    // M-1: Read token from HttpOnly cookie instead of Authorization header.
     if let Some(token) = get_cookie_token(req.headers()) {
         if verify_session_token(&config.secret, &config.username, &token) {
-            // H-2: Reject tokens that have been explicitly revoked (e.g. after logout).
             let sig = token_sig(&token).unwrap_or_default();
             if !config.revocation.lock().await.contains(&sig) {
                 return next.run(req).await;
@@ -434,4 +430,3 @@ async fn index_handler() -> impl IntoResponse {
 #[cfg(test)]
 #[path = "main_test.rs"]
 mod tests;
-

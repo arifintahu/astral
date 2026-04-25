@@ -38,23 +38,25 @@
     return `M 0,${height} L ${points.join(' ')} L ${width},${height} Z`;
   }
 
-  // Circular gauge
   const radius = 40;
   const circumference = 2 * Math.PI * radius;
   let dashOffset = $derived(circumference - (usage / 100) * circumference);
 </script>
 
-<div class="glass-card p-6 h-full flex flex-col justify-between">
+<!-- T-14: border for card separation; T-05: brighter label with cyan top accent -->
+<div class="glass-card p-6 h-full flex flex-col justify-between border border-white/[0.08] border-t-cyan-500/30">
   <div class="flex justify-between items-center mb-5">
-    <h3 class="metric-label">Processor</h3>
+    <h3 class="text-[11px] font-bold text-slate-300 uppercase tracking-[0.15em]">Processor</h3>
     <span class="metric-badge badge-cyan">{cores} cores</span>
   </div>
 
   <div class="flex items-center gap-5">
-    <!-- Circular gauge -->
+    <!-- T-04: circular gauge with visible background track -->
     <div class="relative flex-shrink-0">
       <svg width="96" height="96" viewBox="0 0 96 96" class="transform -rotate-90">
-        <circle cx="48" cy="48" r={radius} fill="none" stroke="rgba(255,255,255,0.04)" stroke-width="6" />
+        <!-- Background track — always visible at 15% white so the gauge reads at 0% -->
+        <circle cx="48" cy="48" r={radius} fill="none" stroke="rgba(255,255,255,0.12)" stroke-width="6" />
+        <!-- Filled arc -->
         <circle
           cx="48" cy="48" r={radius}
           fill="none"
