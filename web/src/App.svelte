@@ -10,6 +10,7 @@
   import ProcessList from './lib/components/ProcessList.svelte';
   import Toast from './lib/components/Toast.svelte';
   import Login from './lib/components/Login.svelte';
+  import AlertHistoryDrawer from './lib/components/AlertHistoryDrawer.svelte';
 
   let metrics: SystemMetrics | null = $state(null);
   let cpuHistory: number[] = $state([]);
@@ -19,24 +20,24 @@
   let authenticated = $state(false);
   let refreshRate = $state(1);
   let lastUpdate = $state(0);
+  let showAlertHistory = $state(false);
 
-  let eventSource: EventSource | null = null;
-  let alertSource: EventSource | null = null;
+  let eventSource: { close: () => void } | null = null;
+  let alertSource: { close: () => void } | null = null;
 
   function handleLogin() {
-    // M-1: Token is an HttpOnly cookie set by the server — nothing to store client-side.
     authenticated = true;
     connectStreams();
   }
 
   async function handleLogout() {
-    // H-2: Revoke the session server-side before clearing local state.
     await fetch('/api/logout', { method: 'POST' }).catch(() => {});
     authenticated = false;
     metrics = null;
     cpuHistory = [];
     txHistory = [];
     rxHistory = [];
+    alerts = [];
     if (eventSource) eventSource.close();
     if (alertSource) alertSource.close();
   }
@@ -49,12 +50,9 @@
     alerts = alerts.filter((_, i) => i !== index);
   }
 
-  // Auto-dismiss alerts after 10 seconds
   function scheduleAlertDismiss() {
     setTimeout(() => {
-      if (alerts.length > 0) {
-        alerts = alerts.slice(1);
-      }
+      if (alerts.length > 0) alerts = alerts.slice(1);
     }, 10000);
   }
 
@@ -64,123 +62,101 @@
   }
 
   function startMetricsStream() {
-    // M-1: Session cookie is sent automatically for same-origin requests — no auth header needed.
     const abortController = new AbortController();
 
-    fetch('/api/stream', {
-      signal: abortController.signal,
-    }).then(response => {
-      if (!response.ok) {
-        if (response.status === 401) {
-          handleLogout();
-          return;
+    fetch('/api/stream', { signal: abortController.signal })
+      .then(response => {
+        if (!response.ok) {
+          if (response.status === 401) { handleLogout(); return; }
+          throw new Error(`HTTP ${response.status}`);
         }
-        throw new Error(`HTTP ${response.status}`);
-      }
-      const reader = response.body!.getReader();
-      const decoder = new TextDecoder();
-      let buffer = '';
+        const reader = response.body!.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
 
-      function pump(): Promise<void> {
-        return reader.read().then(({ done, value }) => {
-          if (done) return;
-          buffer += decoder.decode(value, { stream: true });
-          const lines = buffer.split('\n');
-          buffer = lines.pop() || '';
+        function pump(): Promise<void> {
+          return reader.read().then(({ done, value }) => {
+            if (done) return;
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split('\n');
+            buffer = lines.pop() || '';
 
-          for (const line of lines) {
-            if (line.startsWith('data: ')) {
-              const now = Date.now();
-              if (now - lastUpdate < refreshRate * 1000 - 100) continue;
-              lastUpdate = now;
-
-              try {
-                const data: SystemMetrics = JSON.parse(line.slice(6));
-                metrics = data;
-
-                if (metrics) {
-                  cpuHistory = [...cpuHistory, metrics.cpu_usage].slice(-60);
-                  txHistory = [...txHistory, metrics.network_tx].slice(-30);
-                  rxHistory = [...rxHistory, metrics.network_rx].slice(-30);
-                }
-              } catch (e) {
-                // ignore parse errors
+            for (const line of lines) {
+              if (line.startsWith('data: ')) {
+                const now = Date.now();
+                if (now - lastUpdate < refreshRate * 1000 - 100) continue;
+                lastUpdate = now;
+                try {
+                  const data: SystemMetrics = JSON.parse(line.slice(6));
+                  metrics = data;
+                  cpuHistory = [...cpuHistory, data.cpu_usage].slice(-60);
+                  txHistory = [...txHistory, data.network_tx].slice(-30);
+                  rxHistory = [...rxHistory, data.network_rx].slice(-30);
+                } catch { /* ignore parse errors */ }
               }
             }
-          }
-          return pump();
-        });
-      }
-      pump();
-    }).catch(e => {
-      if (e.name !== 'AbortError') {
-        console.error('Metrics stream error:', e);
-        // Retry after 3s
-        setTimeout(() => {
-          if (authenticated) startMetricsStream();
-        }, 3000);
-      }
-    });
+            return pump();
+          });
+        }
+        pump();
+      })
+      .catch(e => {
+        if (e.name !== 'AbortError') {
+          setTimeout(() => { if (authenticated) startMetricsStream(); }, 3000);
+        }
+      });
 
-    // Store abort controller for cleanup
-    eventSource = { close: () => abortController.abort() } as any;
+    eventSource = { close: () => abortController.abort() };
   }
 
   function startAlertStream() {
     const abortController = new AbortController();
 
-    fetch('/api/alerts', {
-      signal: abortController.signal,
-    }).then(response => {
-      if (!response.ok) return;
-      const reader = response.body!.getReader();
-      const decoder = new TextDecoder();
-      let buffer = '';
+    fetch('/api/alerts', { signal: abortController.signal })
+      .then(response => {
+        if (!response.ok) return;
+        const reader = response.body!.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
 
-      function pump(): Promise<void> {
-        return reader.read().then(({ done, value }) => {
-          if (done) return;
-          buffer += decoder.decode(value, { stream: true });
-          const lines = buffer.split('\n');
-          buffer = lines.pop() || '';
+        function pump(): Promise<void> {
+          return reader.read().then(({ done, value }) => {
+            if (done) return;
+            buffer += decoder.decode(value, { stream: true });
+            const lines = buffer.split('\n');
+            buffer = lines.pop() || '';
 
-          let nextIsAlertData = false;
-          for (const line of lines) {
-            if (line === 'event: alert') {
-              nextIsAlertData = true;
-            } else if (nextIsAlertData && line.startsWith('data: ')) {
-              try {
-                const alert: AlertEvent = JSON.parse(line.slice(6));
-                alerts = [...alerts, alert].slice(-5);
-                scheduleAlertDismiss();
-              } catch (e) {}
-              nextIsAlertData = false;
+            let nextIsAlertData = false;
+            for (const line of lines) {
+              if (line === 'event: alert') {
+                nextIsAlertData = true;
+              } else if (nextIsAlertData && line.startsWith('data: ')) {
+                try {
+                  const alert: AlertEvent = JSON.parse(line.slice(6));
+                  alerts = [...alerts, alert].slice(-5);
+                  scheduleAlertDismiss();
+                } catch { /* ignore */ }
+                nextIsAlertData = false;
+              }
             }
-          }
-          return pump();
-        });
-      }
-      pump();
-    }).catch(e => {
-      if (e.name !== 'AbortError') {
-        setTimeout(() => {
-          if (authenticated) startAlertStream();
-        }, 5000);
-      }
-    });
+            return pump();
+          });
+        }
+        pump();
+      })
+      .catch(e => {
+        if (e.name !== 'AbortError') {
+          setTimeout(() => { if (authenticated) startAlertStream(); }, 5000);
+        }
+      });
 
-    alertSource = { close: () => abortController.abort() } as any;
+    alertSource = { close: () => abortController.abort() };
   }
 
   onMount(() => {
-    // M-1: Check for an active session via cookie — no sessionStorage lookup needed.
     fetch('/api/auth/check').then(res => {
-      if (res.ok) {
-        authenticated = true;
-        connectStreams();
-      }
+      if (res.ok) { authenticated = true; connectStreams(); }
     }).catch(() => {});
-
 
     return () => {
       if (eventSource) eventSource.close();
@@ -194,12 +170,17 @@
 {:else}
   <Toast {alerts} onDismiss={dismissAlert} />
 
+  <!-- T-07: alert history drawer -->
+  <AlertHistoryDrawer open={showAlertHistory} onClose={() => showAlertHistory = false} />
+
   <div class="min-h-screen p-4 md:p-6 lg:p-8 max-w-screen-2xl mx-auto">
     <TopBar
       {metrics}
       {refreshRate}
+      {alerts}
       onRefreshRateChange={handleRefreshRateChange}
       onLogout={handleLogout}
+      onShowAlertHistory={() => showAlertHistory = true}
     />
 
     {#if metrics}
@@ -260,7 +241,7 @@
             <div class="skeleton h-3 w-24"></div>
             <div class="skeleton h-6 w-20"></div>
           </div>
-          {#each [1, 2, 3, 4, 5] as i}
+          {#each [1, 2, 3, 4, 5] as _i}
             <div class="skeleton h-6 w-full mb-2"></div>
           {/each}
         </div>

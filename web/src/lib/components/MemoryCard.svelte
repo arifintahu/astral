@@ -2,9 +2,6 @@
   let { used, total, swap_used, swap_total }: { used: number, total: number, swap_used: number, swap_total: number } = $props();
 
   let percent = $derived(total > 0 ? (used / total) * 100 : 0);
-  let statusColor = $derived(
-    percent >= 90 ? 'text-rose-400' : percent >= 75 ? 'text-amber-400' : 'text-emerald-400'
-  );
   let barColor = $derived(
     percent >= 90 ? 'bg-rose-500/80' : percent >= 75 ? 'bg-amber-500/80' : 'bg-cyan-500/60'
   );
@@ -18,9 +15,10 @@
   }
 </script>
 
-<div class="glass-card p-6 h-full flex flex-col justify-between">
+<!-- T-14: border; T-05: brighter label with purple top accent -->
+<div class="glass-card p-6 h-full flex flex-col justify-between border border-white/[0.08] border-t-purple-500/30">
   <div class="flex justify-between items-center mb-5">
-    <h3 class="metric-label">Memory</h3>
+    <h3 class="text-[11px] font-bold text-slate-300 uppercase tracking-[0.15em]">Memory</h3>
     <span class="metric-badge badge-cyan">
       Swap {formatBytes(swap_used)}
     </span>
@@ -37,11 +35,7 @@
     </div>
   </div>
 
-  <!-- Progress bar -->
   <div class="progress-track h-2">
-    <div
-      class="progress-fill {barColor}"
-      style="width: {percent}%"
-    ></div>
+    <div class="progress-fill {barColor}" style="width: {percent}%"></div>
   </div>
 </div>
