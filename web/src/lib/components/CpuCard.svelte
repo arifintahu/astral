@@ -1,85 +1,71 @@
 <script lang="ts">
-  let { usage, cores, history }: { usage: number, cores: number, history: number[] } = $props();
+  import MiniChart from './MiniChart.svelte';
 
-  let statusColor = $derived(
-    usage >= 90 ? 'text-rose-400' : usage >= 70 ? 'text-amber-400' : 'text-emerald-400'
-  );
-  let fillColor = $derived(
-    usage >= 90 ? 'stroke-rose-400' : usage >= 70 ? 'stroke-amber-400' : 'stroke-cyan-400'
-  );
-  let sparkFill = $derived(
-    usage >= 90 ? 'rgba(244,63,94,0.08)' : usage >= 70 ? 'rgba(251,191,36,0.08)' : 'rgba(6,182,212,0.08)'
-  );
-  let sparkStroke = $derived(
-    usage >= 90 ? 'rgba(244,63,94,0.6)' : usage >= 70 ? 'rgba(251,191,36,0.6)' : 'rgba(6,182,212,0.5)'
-  );
+  let { usage, cores, history, load }: {
+    usage: number;
+    cores: number;
+    history: number[];
+    load: [number, number, number];
+  } = $props();
 
-  function getSparklinePath(data: number[], width: number, height: number): string {
-    if (data.length < 2) return '';
-    const step = width / (data.length - 1);
-    const max = 100;
-    const points = data.map((val, i) => {
-      const x = i * step;
-      const y = height - (val / max) * height;
-      return `${x},${y}`;
-    });
-    return `M ${points.join(' ')}`;
+  function sevColor(v: number): string {
+    if (v >= 90) return 'var(--crit)';
+    if (v >= 70) return 'var(--warm)';
+    return 'var(--accent)';
   }
 
-  function getSparklineArea(data: number[], width: number, height: number): string {
-    if (data.length < 2) return '';
-    const step = width / (data.length - 1);
-    const max = 100;
-    const points = data.map((val, i) => {
-      const x = i * step;
-      const y = height - (val / max) * height;
-      return `${x},${y}`;
-    });
-    return `M 0,${height} L ${points.join(' ')} L ${width},${height} Z`;
-  }
-
-  const radius = 40;
-  const circumference = 2 * Math.PI * radius;
-  let dashOffset = $derived(circumference - (usage / 100) * circumference);
+  const R = 26;
+  const CIRC = 2 * Math.PI * R;
+  let dashOffset = $derived(CIRC - (usage / 100) * CIRC);
+  let accentColor = $derived(sevColor(usage));
 </script>
 
-<!-- T-14: border for card separation; T-05: brighter label with cyan top accent -->
-<div class="glass-card p-6 h-full flex flex-col justify-between border border-white/[0.08] border-t-cyan-500/30">
-  <div class="flex justify-between items-center mb-5">
-    <h3 class="text-[11px] font-bold text-slate-300 uppercase tracking-[0.15em]">Processor</h3>
-    <span class="metric-badge badge-cyan">{cores} cores</span>
+<div class="surface card-hover h-full flex flex-col relative overflow-hidden" style="padding:18px 20px">
+  <!-- Top accent hairline -->
+  <div class="absolute top-0 left-0 right-0 rounded-t-[14px]"
+       style="height:2px;background:linear-gradient(90deg,{accentColor}80,{accentColor}00)"></div>
+
+  <!-- Header -->
+  <div class="flex items-center justify-between mb-4">
+    <span class="eyebrow">CPU</span>
+    <span class="tnum font-mono" style="font-size:10px;padding:3px 8px;border-radius:6px;background:var(--bg-2);color:var(--ink-4);border:1px solid var(--line)">{cores} cores</span>
   </div>
 
-  <div class="flex items-center gap-5">
-    <!-- T-04: circular gauge with visible background track -->
-    <div class="relative flex-shrink-0">
-      <svg width="96" height="96" viewBox="0 0 96 96" class="transform -rotate-90">
-        <!-- Background track — always visible at 15% white so the gauge reads at 0% -->
-        <circle cx="48" cy="48" r={radius} fill="none" stroke="rgba(255,255,255,0.12)" stroke-width="6" />
-        <!-- Filled arc -->
-        <circle
-          cx="48" cy="48" r={radius}
-          fill="none"
-          class={fillColor}
-          stroke-width="6"
-          stroke-linecap="round"
-          stroke-dasharray={circumference}
-          stroke-dashoffset={dashOffset}
-          style="transition: stroke-dashoffset 0.7s ease-out, stroke 0.5s ease;"
-        />
+  <!-- Body -->
+  <div class="flex items-center gap-4 flex-1 min-h-0">
+    <!-- Ring gauge -->
+    <div class="relative flex-shrink-0" style="width:64px;height:64px">
+      <svg width="64" height="64" viewBox="0 0 64 64" style="transform:rotate(-90deg);display:block">
+        <circle cx="32" cy="32" r={R} fill="none" stroke="var(--line-2)" stroke-width="5" />
+        <circle cx="32" cy="32" r={R} fill="none"
+                stroke={accentColor}
+                stroke-width="5"
+                stroke-linecap="round"
+                stroke-dasharray={CIRC}
+                stroke-dashoffset={dashOffset}
+                style="transition:stroke-dashoffset 0.6s ease,stroke 0.4s ease" />
       </svg>
       <div class="absolute inset-0 flex flex-col items-center justify-center">
-        <span class="text-2xl font-bold text-white tabular-nums tracking-tight">{usage.toFixed(0)}</span>
-        <span class="text-[10px] text-slate-500 font-medium -mt-0.5">%</span>
+        <span class="tnum font-mono font-semibold" style="font-size:16px;color:var(--ink);line-height:1">{usage.toFixed(0)}</span>
+        <span style="font-size:9px;color:var(--ink-4)">%</span>
       </div>
     </div>
 
-    <!-- Sparkline -->
-    <div class="flex-1 h-16 min-w-0">
-      <svg width="100%" height="100%" viewBox="0 0 140 48" preserveAspectRatio="none" class="overflow-visible">
-        <path d={getSparklineArea(history, 140, 48)} fill={sparkFill} />
-        <path d={getSparklinePath(history, 140, 48)} fill="none" stroke={sparkStroke} stroke-width="1.5" vector-effect="non-scaling-stroke" />
-      </svg>
+    <!-- Right: sparkline + load avg -->
+    <div class="flex-1 flex flex-col gap-2 min-w-0" style="min-height:0">
+      <div style="flex:1;min-height:36px">
+        <MiniChart data={history} max={100} color={accentColor} w={140} h={44} />
+      </div>
+      {#if load[0] > 0}
+        <div class="flex gap-3">
+          {#each [['1m', load[0]], ['5m', load[1]], ['15m', load[2]]] as [label, val]}
+            <div class="flex flex-col items-center">
+              <span class="tnum font-mono" style="font-size:11px;color:var(--ink-2)">{(val as number).toFixed(2)}</span>
+              <span style="font-size:9px;color:var(--ink-4)">{label}</span>
+            </div>
+          {/each}
+        </div>
+      {/if}
     </div>
   </div>
 </div>

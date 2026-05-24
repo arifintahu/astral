@@ -3,121 +3,76 @@
 
   let { disks }: { disks: DiskInfo[] } = $props();
 
-  let rootDisk = $derived(disks.find(d => d.mount_point === '/') || disks[0]);
-  let totalSpace = $derived(rootDisk ? rootDisk.total_space : 0);
-  let totalUsed = $derived(rootDisk ? (rootDisk.total_space - rootDisk.available_space) : 0);
-  let utilization = $derived(totalSpace > 0 ? (totalUsed / totalSpace) * 100 : 0);
-
-  // T-12: aggregate I/O rates — already bytes/s from sysinfo delta.
-  let totalRead = $derived(disks.reduce((sum, d) => sum + d.read_bytes, 0));
-  let totalWritten = $derived(disks.reduce((sum, d) => sum + d.written_bytes, 0));
-
-  // T-10: per-disk breakdown visibility
-  let showBreakdown = $state(false);
-
-  let barColor = $derived(
-    utilization >= 90
-      ? 'bg-rose-500/80'
-      : utilization >= 75
-      ? 'bg-amber-500/80'
-      : 'bg-gradient-to-r from-purple-500/70 to-cyan-500/70'
-  );
-
-  function formatBytes(bytes: number): string {
-    if (bytes === 0) return '0 B';
-    const k = 1024;
-    const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
-    const i = Math.floor(Math.log(bytes) / Math.log(k));
-    return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+  function sevColor(v: number): string {
+    if (v >= 90) return 'var(--crit)';
+    if (v >= 70) return 'var(--warm)';
+    return 'var(--accent)';
   }
 
-  // T-12: show B/s rate (already a delta value from sysinfo).
-  function formatRate(bytes: number): string {
-    if (bytes === 0) return '0 B/s';
-    const k = 1024;
-    const sizes = ['B/s', 'KB/s', 'MB/s', 'GB/s'];
-    const i = Math.floor(Math.log(bytes) / Math.log(k));
-    return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+  function fmt(b: number): string {
+    if (b >= 1099511627776) return (b / 1099511627776).toFixed(1) + ' TB';
+    if (b >= 1073741824)    return (b / 1073741824).toFixed(1) + ' GB';
+    if (b >= 1048576)       return (b / 1048576).toFixed(0) + ' MB';
+    return (b / 1024).toFixed(0) + ' KB';
   }
 
-  function diskPercent(d: DiskInfo): number {
-    if (d.total_space === 0) return 0;
-    return ((d.total_space - d.available_space) / d.total_space) * 100;
+  function fmtRate(b: number): string {
+    if (b >= 1048576) return (b / 1048576).toFixed(1) + ' MB/s';
+    if (b >= 1024)    return (b / 1024).toFixed(0) + ' KB/s';
+    return b + ' B/s';
   }
+
+  let primary   = $derived(disks[0] ?? null);
+  let totalUsed = $derived(primary ? primary.total_space - primary.available_space : 0);
+  let usedPct   = $derived(primary && primary.total_space > 0
+    ? (totalUsed / primary.total_space) * 100 : 0);
 </script>
 
-<!-- T-14: border; T-05: brighter label with emerald top accent -->
-<div class="glass-card p-6 h-full flex flex-col justify-between border border-white/[0.08] border-t-emerald-500/30">
-  <div class="flex justify-between items-center mb-5">
-    <h3 class="text-[11px] font-bold text-slate-300 uppercase tracking-[0.15em]">Storage</h3>
-    <!-- T-10: toggle breakdown when >1 disk -->
-    {#if disks.length > 1}
-      <button
-        onclick={() => showBreakdown = !showBreakdown}
-        class="metric-badge badge-cyan cursor-pointer hover:bg-cyan-500/20 transition-colors"
-        title={showBreakdown ? 'Hide per-disk breakdown' : 'Show per-disk breakdown'}
-      >
-        {disks.length} mounts {showBreakdown ? '▲' : '▼'}
-      </button>
-    {:else}
-      <span class="metric-badge badge-cyan">{disks.length} mount</span>
-    {/if}
-  </div>
+<div class="surface card-hover h-full flex flex-col relative overflow-hidden" style="padding:18px 20px">
+  {#if primary}
+    {@const barColor = sevColor(usedPct)}
+    <div class="absolute top-0 left-0 right-0 rounded-t-[14px]"
+         style="height:2px;background:linear-gradient(90deg,{barColor}80,{barColor}00)"></div>
 
-  <!-- Primary disk -->
-  <div class="mb-3">
-    <div class="flex justify-between items-end mb-3">
-      <div>
-        <span class="text-3xl font-extrabold text-white tracking-tight tabular-nums">{utilization.toFixed(0)}</span>
-        <span class="text-sm text-slate-500 ml-0.5 font-normal">%</span>
+    <div class="flex items-center justify-between mb-4">
+      <span class="eyebrow">Storage</span>
+      <span class="tnum font-mono" style="font-size:10px;padding:3px 8px;border-radius:6px;background:var(--bg-2);color:var(--ink-4);border:1px solid var(--line)">{disks.length} mount{disks.length !== 1 ? 's' : ''}</span>
+    </div>
+
+    <!-- Large % + used/total -->
+    <div class="flex items-end justify-between mb-4">
+      <div class="flex items-baseline gap-1">
+        <span class="tnum font-mono font-semibold" style="font-size:34px;color:var(--ink);line-height:1">{usedPct.toFixed(0)}</span>
+        <span style="font-size:14px;color:var(--ink-3)">%</span>
       </div>
       <div class="text-right">
-        <div class="text-sm font-mono text-slate-300 font-medium">{formatBytes(totalUsed)}</div>
-        <div class="text-[11px] text-slate-600 font-mono">of {formatBytes(totalSpace)}</div>
+        <div class="tnum font-mono" style="font-size:11px;color:var(--ink-2)">{fmt(totalUsed)}</div>
+        <div class="tnum font-mono" style="font-size:11px;color:var(--ink-4)">of {fmt(primary.total_space)}</div>
       </div>
     </div>
-    <div class="progress-track h-2.5">
-      <div class="progress-fill {barColor}" style="width: {utilization}%"></div>
-    </div>
-  </div>
 
-  <!-- T-10: per-disk breakdown -->
-  {#if showBreakdown && disks.length > 1}
-    <div class="mb-3 space-y-2 max-h-28 overflow-y-auto custom-scrollbar pr-1">
-      {#each disks as disk}
-        {@const pct = diskPercent(disk)}
-        <div>
-          <div class="flex justify-between items-center mb-0.5">
-            <span class="text-[10px] text-slate-400 truncate max-w-[60%]" title={disk.mount_point}>{disk.mount_point}</span>
-            <span class="text-[10px] font-mono text-slate-500">{pct.toFixed(0)}%</span>
-          </div>
-          <div class="progress-track h-1">
-            <div
-              class="progress-fill {pct >= 90 ? 'bg-rose-500/80' : pct >= 75 ? 'bg-amber-500/80' : 'bg-cyan-500/50'}"
-              style="width: {pct}%"
-            ></div>
-          </div>
-        </div>
+    <!-- Per-mount bar -->
+    <div class="overflow-hidden mb-4" style="height:6px;background:var(--bg-2);border:1px solid var(--line);border-radius:3px;display:flex">
+      {#each disks as disk, i}
+        {@const pct = primary.total_space > 0 ? ((disk.total_space - disk.available_space) / primary.total_space) * 100 : 0}
+        <div class="h-full transition-all duration-700"
+             style="width:{pct}%;background:{i === 0 ? sevColor(usedPct) : 'var(--ink-3)'};opacity:{i === 0 ? 1 : 0.4}"></div>
       {/each}
     </div>
-  {/if}
 
-  <!-- T-12: Disk I/O shown as B/s rate (not cumulative bytes) -->
-  <div class="flex gap-4 py-2.5 px-3 bg-white/[0.02] rounded-lg border border-white/[0.03]">
-    <div class="flex items-center gap-2">
-      <svg class="w-3 h-3 text-cyan-500/60" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 14l-7 7m0 0l-7-7m7 7V3"></path>
-      </svg>
-      <span class="text-[11px] text-slate-500">Read</span>
-      <span class="text-[12px] font-mono text-slate-300 tabular-nums">{formatRate(totalRead)}</span>
+    <!-- I/O rates + mount path -->
+    <div class="flex items-center gap-4 mt-auto">
+      <div class="flex items-center gap-1">
+        <span style="font-size:10px;color:var(--accent)">↓</span>
+        <span class="tnum font-mono" style="font-size:11px;color:var(--ink-2)">{fmtRate(primary.read_bytes)}</span>
+      </div>
+      <div class="flex items-center gap-1">
+        <span style="font-size:10px;color:var(--warm)">↑</span>
+        <span class="tnum font-mono" style="font-size:11px;color:var(--ink-2)">{fmtRate(primary.written_bytes)}</span>
+      </div>
+      <span class="font-mono truncate ml-auto" style="font-size:10px;color:var(--ink-4)">{primary.mount_point}</span>
     </div>
-    <div class="h-4 w-px bg-white/[0.06]"></div>
-    <div class="flex items-center gap-2">
-      <svg class="w-3 h-3 text-purple-500/60" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 10l7-7m0 0l7 7m-7-7v18"></path>
-      </svg>
-      <span class="text-[11px] text-slate-500">Write</span>
-      <span class="text-[12px] font-mono text-slate-300 tabular-nums">{formatRate(totalWritten)}</span>
-    </div>
-  </div>
+  {:else}
+    <div class="flex items-center justify-center flex-1" style="color:var(--ink-4);font-size:12px">No disks detected</div>
+  {/if}
 </div>

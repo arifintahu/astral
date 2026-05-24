@@ -77,6 +77,7 @@ struct AuthConfig {
     password_hash: String,
     secret: String,
     revocation: RevocationSet,
+    revoke_all_at: Arc<Mutex<u64>>,
 }
 
 const MAX_LOGIN_ATTEMPTS: u32 = 5;
@@ -139,7 +140,8 @@ async fn main() -> anyhow::Result<()> {
 
     let secret = uuid::Uuid::new_v4().to_string();
     let revocation: RevocationSet = Arc::new(Mutex::new(HashSet::new()));
-    let auth_config = AuthConfig { username, password_hash, secret, revocation };
+    let revoke_all_at: Arc<Mutex<u64>> = Arc::new(Mutex::new(0u64));
+    let auth_config = AuthConfig { username, password_hash, secret, revocation, revoke_all_at: revoke_all_at.clone() };
     let limiter = LoginLimiter::new();
 
     let limiter_cleanup = limiter.clone();
@@ -196,6 +198,7 @@ async fn main() -> anyhow::Result<()> {
         alert_tx,
         config: shared_config,
         alert_history,
+        revoke_all_at,
     };
     let auth_config_clone = auth_config.clone();
 
@@ -241,7 +244,7 @@ async fn main() -> anyhow::Result<()> {
         h.insert("Referrer-Policy", "strict-origin-when-cross-origin".parse().unwrap());
         h.insert(
             "Content-Security-Policy",
-            "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self'"
+            "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; connect-src 'self'; img-src 'self' data:"
                 .parse()
                 .unwrap(),
         );
@@ -394,7 +397,13 @@ async fn auth_middleware(req: Request<Body>, next: Next, config: AuthConfig) -> 
         if verify_session_token(&config.secret, &config.username, &token) {
             let sig = token_sig(&token).unwrap_or_default();
             if !config.revocation.lock().await.contains(&sig) {
-                return next.run(req).await;
+                // Check bulk revocation: token timestamp must be after the last revoke_all_at
+                let parts: Vec<&str> = token.splitn(3, '.').collect();
+                let token_ts: u64 = parts.first().and_then(|s| s.parse().ok()).unwrap_or(0);
+                let revoke_ts = *config.revoke_all_at.lock().await;
+                if token_ts > revoke_ts {
+                    return next.run(req).await;
+                }
             }
         }
     }

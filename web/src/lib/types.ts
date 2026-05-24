@@ -21,6 +21,7 @@ export interface SystemMetrics {
     uptime: number;
     cpu_usage: number;
     cpu_cores: number;
+    cpu_load: [number, number, number];
     total_memory: number;
     used_memory: number;
     total_swap: number;

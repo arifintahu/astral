@@ -1,99 +1,74 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import type { SystemMetrics, AlertEvent } from './lib/types';
-  import TopBar from './lib/components/TopBar.svelte';
-  import CpuCard from './lib/components/CpuCard.svelte';
-  import MemoryCard from './lib/components/MemoryCard.svelte';
-  import NetworkCard from './lib/components/NetworkCard.svelte';
-  import DiskCard from './lib/components/DiskCard.svelte';
-  import HistoryChart from './lib/components/HistoryChart.svelte';
-  import ProcessList from './lib/components/ProcessList.svelte';
-  import Toast from './lib/components/Toast.svelte';
-  import Login from './lib/components/Login.svelte';
+  import TopBar             from './lib/components/TopBar.svelte';
+  import CpuCard            from './lib/components/CpuCard.svelte';
+  import MemoryCard         from './lib/components/MemoryCard.svelte';
+  import NetworkCard        from './lib/components/NetworkCard.svelte';
+  import DiskCard           from './lib/components/DiskCard.svelte';
+  import HistoryChart       from './lib/components/HistoryChart.svelte';
+  import ProcessList        from './lib/components/ProcessList.svelte';
+  import Toast              from './lib/components/Toast.svelte';
+  import Login              from './lib/components/Login.svelte';
   import AlertHistoryDrawer from './lib/components/AlertHistoryDrawer.svelte';
+  import Settings           from './lib/components/Settings.svelte';
 
   let metrics: SystemMetrics | null = $state(null);
   let cpuHistory: number[] = $state([]);
-  let txHistory: number[] = $state([]);
-  let rxHistory: number[] = $state([]);
-  let alerts: AlertEvent[] = $state([]);
+  let txHistory:  number[] = $state([]);
+  let rxHistory:  number[] = $state([]);
+  let alerts: AlertEvent[]  = $state([]);
   let authenticated = $state(false);
-  let refreshRate = $state(1);
-  let lastUpdate = $state(0);
+  let refreshRate   = $state(1);
+  let lastUpdate    = $state(0);
+  let lastRefreshTs = $state(0);
   let showAlertHistory = $state(false);
+  let showSettings     = $state(false);
 
   let eventSource: { close: () => void } | null = null;
-  let alertSource: { close: () => void } | null = null;
+  let alertSource:  { close: () => void } | null = null;
 
-  function handleLogin() {
-    authenticated = true;
-    connectStreams();
-  }
+  function handleLogin() { authenticated = true; connectStreams(); }
 
   async function handleLogout() {
     await fetch('/api/logout', { method: 'POST' }).catch(() => {});
-    authenticated = false;
-    metrics = null;
-    cpuHistory = [];
-    txHistory = [];
-    rxHistory = [];
-    alerts = [];
-    if (eventSource) eventSource.close();
-    if (alertSource) alertSource.close();
+    authenticated = false; metrics = null;
+    cpuHistory = []; txHistory = []; rxHistory = []; alerts = [];
+    showSettings = false; showAlertHistory = false;
+    eventSource?.close(); alertSource?.close();
   }
 
-  function handleRefreshRateChange(rate: number) {
-    refreshRate = rate;
-  }
-
-  function dismissAlert(index: number) {
-    alerts = alerts.filter((_, i) => i !== index);
-  }
-
-  function scheduleAlertDismiss() {
-    setTimeout(() => {
-      if (alerts.length > 0) alerts = alerts.slice(1);
-    }, 10000);
-  }
-
-  function connectStreams() {
-    startMetricsStream();
-    startAlertStream();
-  }
+  function handleRefreshRateChange(rate: number) { refreshRate = rate; }
+  function dismissAlert(i: number) { alerts = alerts.filter((_, idx) => idx !== i); }
+  function connectStreams() { startMetricsStream(); startAlertStream(); }
 
   function startMetricsStream() {
-    const abortController = new AbortController();
-
-    fetch('/api/stream', { signal: abortController.signal })
-      .then(response => {
-        if (!response.ok) {
-          if (response.status === 401) { handleLogout(); return; }
-          throw new Error(`HTTP ${response.status}`);
-        }
-        const reader = response.body!.getReader();
-        const decoder = new TextDecoder();
-        let buffer = '';
-
+    const ac = new AbortController();
+    fetch('/api/stream', { signal: ac.signal })
+      .then(res => {
+        if (!res.ok) { if (res.status === 401) handleLogout(); return; }
+        const reader = res.body!.getReader();
+        const dec = new TextDecoder();
+        let buf = '';
         function pump(): Promise<void> {
           return reader.read().then(({ done, value }) => {
             if (done) return;
-            buffer += decoder.decode(value, { stream: true });
-            const lines = buffer.split('\n');
-            buffer = lines.pop() || '';
-
+            buf += dec.decode(value, { stream: true });
+            const lines = buf.split('\n');
+            buf = lines.pop() ?? '';
             for (const line of lines) {
-              if (line.startsWith('data: ')) {
-                const now = Date.now();
-                if (now - lastUpdate < refreshRate * 1000 - 100) continue;
-                lastUpdate = now;
-                try {
-                  const data: SystemMetrics = JSON.parse(line.slice(6));
-                  metrics = data;
-                  cpuHistory = [...cpuHistory, data.cpu_usage].slice(-60);
-                  txHistory = [...txHistory, data.network_tx].slice(-30);
-                  rxHistory = [...rxHistory, data.network_rx].slice(-30);
-                } catch { /* ignore parse errors */ }
-              }
+              if (!line.startsWith('data: ')) continue;
+              const now = Date.now();
+              if (now - lastUpdate < refreshRate * 1000 - 100) continue;
+              lastUpdate = now;
+              lastRefreshTs = Math.floor(now / 1000);
+              try {
+                const d: SystemMetrics = JSON.parse(line.slice(6));
+                metrics = d;
+                cpuHistory = [...cpuHistory, d.cpu_usage].slice(-60);
+                txHistory  = [...txHistory,  d.network_tx].slice(-30);
+                rxHistory  = [...rxHistory,  d.network_rx].slice(-30);
+              } catch { /**/ }
             }
             return pump();
           });
@@ -101,42 +76,34 @@
         pump();
       })
       .catch(e => {
-        if (e.name !== 'AbortError') {
-          setTimeout(() => { if (authenticated) startMetricsStream(); }, 3000);
-        }
+        if (e.name !== 'AbortError' && authenticated) setTimeout(startMetricsStream, 3000);
       });
-
-    eventSource = { close: () => abortController.abort() };
+    eventSource = { close: () => ac.abort() };
   }
 
   function startAlertStream() {
-    const abortController = new AbortController();
-
-    fetch('/api/alerts', { signal: abortController.signal })
-      .then(response => {
-        if (!response.ok) return;
-        const reader = response.body!.getReader();
-        const decoder = new TextDecoder();
-        let buffer = '';
-
+    const ac = new AbortController();
+    fetch('/api/alerts', { signal: ac.signal })
+      .then(res => {
+        if (!res.ok) return;
+        const reader = res.body!.getReader();
+        const dec = new TextDecoder();
+        let buf = '', nextIsData = false;
         function pump(): Promise<void> {
           return reader.read().then(({ done, value }) => {
             if (done) return;
-            buffer += decoder.decode(value, { stream: true });
-            const lines = buffer.split('\n');
-            buffer = lines.pop() || '';
-
-            let nextIsAlertData = false;
+            buf += dec.decode(value, { stream: true });
+            const lines = buf.split('\n');
+            buf = lines.pop() ?? '';
             for (const line of lines) {
-              if (line === 'event: alert') {
-                nextIsAlertData = true;
-              } else if (nextIsAlertData && line.startsWith('data: ')) {
+              if (line === 'event: alert') { nextIsData = true; continue; }
+              if (nextIsData && line.startsWith('data: ')) {
                 try {
-                  const alert: AlertEvent = JSON.parse(line.slice(6));
-                  alerts = [...alerts, alert].slice(-5);
-                  scheduleAlertDismiss();
-                } catch { /* ignore */ }
-                nextIsAlertData = false;
+                  const a: AlertEvent = JSON.parse(line.slice(6));
+                  alerts = [...alerts, a].slice(-5);
+                  setTimeout(() => { if (alerts.length) alerts = alerts.slice(1); }, 10000);
+                } catch { /**/ }
+                nextIsData = false;
               }
             }
             return pump();
@@ -145,23 +112,21 @@
         pump();
       })
       .catch(e => {
-        if (e.name !== 'AbortError') {
-          setTimeout(() => { if (authenticated) startAlertStream(); }, 5000);
-        }
+        if (e.name !== 'AbortError' && authenticated) setTimeout(startAlertStream, 5000);
       });
+    alertSource = { close: () => ac.abort() };
+  }
 
-    alertSource = { close: () => abortController.abort() };
+  function fmtTs(ts: number): string {
+    if (!ts) return '—';
+    return new Date(ts * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
   }
 
   onMount(() => {
-    fetch('/api/auth/check').then(res => {
-      if (res.ok) { authenticated = true; connectStreams(); }
-    }).catch(() => {});
-
-    return () => {
-      if (eventSource) eventSource.close();
-      if (alertSource) alertSource.close();
-    };
+    fetch('/api/auth/check')
+      .then(r => { if (r.ok) { authenticated = true; connectStreams(); } })
+      .catch(() => {});
+    return () => { eventSource?.close(); alertSource?.close(); };
   });
 </script>
 
@@ -169,82 +134,69 @@
   <Login onLogin={handleLogin} />
 {:else}
   <Toast {alerts} onDismiss={dismissAlert} />
-
-  <!-- T-07: alert history drawer -->
   <AlertHistoryDrawer open={showAlertHistory} onClose={() => showAlertHistory = false} />
+  <Settings
+    open={showSettings}
+    onClose={() => showSettings = false}
+    {refreshRate}
+    onRefreshRateChange={handleRefreshRateChange}
+    onLogout={handleLogout}
+  />
 
-  <div class="min-h-screen p-4 md:p-6 lg:p-8 max-w-screen-2xl mx-auto">
+  <div style="max-width:1440px;margin:0 auto;padding:26px 28px">
     <TopBar
       {metrics}
       {refreshRate}
       {alerts}
-      onRefreshRateChange={handleRefreshRateChange}
+      onShowSettings={() => showSettings = true}
       onLogout={handleLogout}
       onShowAlertHistory={() => showAlertHistory = true}
     />
 
     {#if metrics}
-      <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4 md:gap-5">
-        <div class="animate-fade-in-up stagger-1 h-full">
-          <CpuCard usage={metrics.cpu_usage} cores={metrics.cpu_cores} history={cpuHistory} />
+      <!-- Metric cards grid -->
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:20px;margin-bottom:20px">
+        <div class="anim-fade-up stagger-1" style="min-height:160px">
+          <CpuCard usage={metrics.cpu_usage} cores={metrics.cpu_cores} history={cpuHistory} load={metrics.cpu_load} />
         </div>
-        <div class="animate-fade-in-up stagger-2 h-full">
-          <MemoryCard
-            used={metrics.used_memory}
-            total={metrics.total_memory}
-            swap_used={metrics.used_swap}
-            swap_total={metrics.total_swap}
-          />
+        <div class="anim-fade-up stagger-2" style="min-height:160px">
+          <MemoryCard used={metrics.used_memory} total={metrics.total_memory} swap_used={metrics.used_swap} swap_total={metrics.total_swap} />
         </div>
-        <div class="animate-fade-in-up stagger-3 h-full">
+        <div class="anim-fade-up stagger-3" style="min-height:160px">
           <NetworkCard tx={metrics.network_tx} rx={metrics.network_rx} {txHistory} {rxHistory} />
         </div>
-        <div class="animate-fade-in-up stagger-4 h-full">
+        <div class="anim-fade-up stagger-4" style="min-height:160px">
           <DiskCard disks={metrics.disks} />
         </div>
       </div>
 
-      <div class="grid grid-cols-1 xl:grid-cols-3 gap-4 md:gap-5 mt-5 h-[26rem]">
-        <div class="xl:col-span-2 animate-fade-in-up stagger-5 h-full">
-          <HistoryChart />
-        </div>
-        <div class="animate-fade-in-up h-full" style="animation-delay: 0.35s">
-          <ProcessList processes={metrics.processes} totalMemory={metrics.total_memory} />
-        </div>
+      <!-- Bottom row: history + process list -->
+      <div class="anim-fade-up stagger-5" style="display:grid;grid-template-columns:2fr 1fr;gap:20px;height:400px">
+        <HistoryChart totalMemory={metrics.total_memory} />
+        <ProcessList processes={metrics.processes} totalMemory={metrics.total_memory} />
       </div>
+
+      <!-- Footer -->
+      <div style="margin-top:16px;padding:10px 2px;border-top:1px solid var(--line);display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+        <span class="font-mono" style="font-size:10px;color:var(--ink-4)">{metrics.hostname}</span>
+        <span style="color:var(--line-2)">·</span>
+        <span style="font-size:10px;color:var(--ink-4)">Updated {fmtTs(lastRefreshTs)}</span>
+        <span style="color:var(--line-2)">·</span>
+        <span style="font-size:10px;color:var(--ink-4)">Rate {refreshRate}s</span>
+        <span style="color:var(--line-2)">·</span>
+        <span style="font-size:10px;color:var(--ink-4)">Retention {metrics.os_name ? '—' : '—'}</span>
+      </div>
+
     {:else}
-      <!-- Skeleton loading state -->
-      <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4 md:gap-5">
-        {#each [1, 2, 3, 4] as i}
-          <div class="glass-card p-6 animate-fade-in" style="animation-delay: {i * 0.05}s">
-            <div class="flex justify-between items-center mb-5">
-              <div class="skeleton h-3 w-20"></div>
-              <div class="skeleton h-5 w-16"></div>
-            </div>
-            <div class="flex items-end gap-4">
-              <div class="skeleton h-12 w-24"></div>
-              <div class="flex-1 skeleton h-8"></div>
-            </div>
-          </div>
+      <!-- Skeleton loading -->
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:20px;margin-bottom:20px">
+        {#each [0,1,2,3] as i}
+          <div class="skeleton" style="height:160px;animation-delay:{i * 60}ms"></div>
         {/each}
       </div>
-      <div class="grid grid-cols-1 xl:grid-cols-3 gap-4 md:gap-5 mt-5">
-        <div class="xl:col-span-2 glass-panel p-6 animate-fade-in" style="animation-delay: 0.25s">
-          <div class="flex justify-between items-center mb-5">
-            <div class="skeleton h-3 w-16"></div>
-            <div class="skeleton h-7 w-40"></div>
-          </div>
-          <div class="skeleton h-64 w-full"></div>
-        </div>
-        <div class="glass-panel p-6 animate-fade-in" style="animation-delay: 0.3s">
-          <div class="flex justify-between items-center mb-4">
-            <div class="skeleton h-3 w-24"></div>
-            <div class="skeleton h-6 w-20"></div>
-          </div>
-          {#each [1, 2, 3, 4, 5] as _i}
-            <div class="skeleton h-6 w-full mb-2"></div>
-          {/each}
-        </div>
+      <div style="display:grid;grid-template-columns:2fr 1fr;gap:20px">
+        <div class="skeleton" style="height:400px"></div>
+        <div class="skeleton" style="height:400px"></div>
       </div>
     {/if}
   </div>

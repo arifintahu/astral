@@ -1,18 +1,16 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
   import type { DynamicConfig } from '../types';
 
-  let { refreshRate, onRefreshRateChange, onLogout }: {
-    refreshRate: number,
-    onRefreshRateChange: (rate: number) => void,
-    onLogout: () => void,
+  let { open, onClose, refreshRate, onRefreshRateChange, onLogout }: {
+    open: boolean;
+    onClose: () => void;
+    refreshRate: number;
+    onRefreshRateChange: (r: number) => void;
+    onLogout: () => void;
   } = $props();
 
-  let open = $state(false);
-  let saving = $state(false);
-  let saveError = $state('');
-
-  // Local editable copies of server config
+  let saving   = $state(false);
+  let revoking = $state(false);
   let config: DynamicConfig = $state({
     enable_process_list: false,
     alert_cpu: 90,
@@ -20,208 +18,182 @@
     retention_days: 7,
     slack_webhook: null,
   });
-  let slackWebhookInput = $state('');
+  let webhookInput = $state('');
 
-  const rates = [
-    { value: 1, label: '1s' },
-    { value: 2, label: '2s' },
-    { value: 3, label: '3s' },
-    { value: 5, label: '5s' },
-  ];
+  const RATES  = [1, 2, 5, 10];
+  const RETAIN = [7, 30, 90];
 
-  const retentionOptions = [
-    { value: 7, label: '7d' },
-    { value: 30, label: '30d' },
-    { value: 90, label: '90d' },
-  ];
-
-  async function fetchConfig() {
+  async function loadConfig() {
     try {
-      const res = await fetch('/api/settings');
-      if (res.ok) {
-        const data: DynamicConfig = await res.json();
-        config = data;
-        slackWebhookInput = data.slack_webhook ?? '';
-      }
-    } catch { /* ignore */ }
+      const r = await fetch('/api/settings');
+      if (r.ok) { config = await r.json(); webhookInput = config.slack_webhook ?? ''; }
+    } catch {/**/}
   }
 
-  async function saveConfig(patch: Partial<DynamicConfig> & { slack_webhook?: string }) {
+  async function save(patch: Partial<DynamicConfig> & { slack_webhook?: string | null }) {
     saving = true;
-    saveError = '';
     try {
-      const res = await fetch('/api/settings', {
+      await fetch('/api/settings', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(patch),
       });
-      if (!res.ok) saveError = 'Save failed';
-      else await fetchConfig();
-    } catch {
-      saveError = 'Network error';
-    } finally {
-      saving = false;
-    }
+      await loadConfig();
+    } finally { saving = false; }
   }
 
-  $effect(() => {
-    if (open) fetchConfig();
-  });
+  async function revokeAll() {
+    revoking = true;
+    try {
+      await fetch('/api/sessions/revoke', { method: 'POST' });
+      onLogout();
+    } finally { revoking = false; }
+  }
+
+  $effect(() => { if (open) loadConfig(); });
 </script>
 
-<div class="relative">
-  <button
-    onclick={() => open = !open}
-    aria-label="Settings"
-    class="flex items-center justify-center w-8 h-8 rounded-lg bg-white/[0.04] border border-white/[0.06]
-           hover:bg-white/[0.08] hover:border-white/[0.1] transition-all cursor-pointer"
-  >
-    <svg class="w-4 h-4 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
-      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-    </svg>
-  </button>
+{#if open}
+  <!-- Backdrop -->
+  <div class="anim-backdrop" onclick={onClose} role="presentation"
+       style="position:fixed;inset:0;z-index:40;background:rgba(0,0,0,0.5);cursor:default"></div>
 
-  {#if open}
-    <button class="fixed inset-0 z-40 cursor-default" onclick={() => open = false} tabindex="-1" aria-label="Close settings"></button>
+  <!-- Drawer -->
+  <div class="anim-drawer nice-scroll" role="dialog" aria-label="Settings"
+       style="position:fixed;right:0;top:0;bottom:0;z-index:50;width:440px;max-width:100vw;
+              background:var(--bg-1);border-left:1px solid var(--line);
+              display:flex;flex-direction:column;overflow-y:auto">
 
-    <div class="absolute right-0 top-full mt-2 z-50 w-72 animate-fade-in">
-      <div class="bg-slate-950 border border-white/[0.1] rounded-xl shadow-2xl p-4 space-y-4">
+    <!-- Header -->
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:20px 24px;border-bottom:1px solid var(--line);flex-shrink:0">
+      <span style="font-size:15px;font-weight:600;color:var(--ink)">Settings</span>
+      <button onclick={onClose} class="btn" aria-label="Close settings" style="width:28px;height:28px;padding:0;border-radius:6px">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--ink-3)" stroke-width="2" stroke-linecap="round">
+          <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+        </svg>
+      </button>
+    </div>
 
-        <!-- Refresh Rate -->
-        <div>
-          <div class="text-[10px] text-slate-500 uppercase tracking-[0.15em] font-semibold mb-2">Refresh Rate</div>
-          <div class="flex gap-1.5">
-            {#each rates as rate}
-              <button
-                class="flex-1 px-2 py-1.5 text-[11px] font-semibold rounded-lg transition-all duration-200 cursor-pointer
-                       {refreshRate === rate.value
-                         ? 'bg-cyan-500/15 text-cyan-300 border border-cyan-500/20'
-                         : 'text-slate-500 bg-white/[0.03] border border-white/[0.05] hover:text-slate-300 hover:bg-white/[0.06]'}"
-                onclick={() => onRefreshRateChange(rate.value)}
-              >{rate.label}</button>
-            {/each}
+    <!-- Body -->
+    <div style="flex:1;padding:24px;display:flex;flex-direction:column;gap:28px;overflow-y:auto" class="nice-scroll">
+
+      <!-- General -->
+      <section>
+        <div class="eyebrow" style="margin-bottom:14px">General</div>
+        <div style="display:flex;flex-direction:column;gap:12px">
+          <!-- Refresh rate -->
+          <div>
+            <div style="font-size:12px;color:var(--ink-2);margin-bottom:8px">Refresh rate</div>
+            <div class="seg-control">
+              {#each RATES as r}
+                <button class="seg-btn {refreshRate === r ? 'active' : ''}"
+                        onclick={() => onRefreshRateChange(r)}>{r}s</button>
+              {/each}
+            </div>
+          </div>
+          <!-- Process monitoring toggle -->
+          <div class="surface-2" style="padding:10px 14px;display:flex;align-items:center;justify-content:space-between;cursor:pointer"
+               onclick={() => save({ enable_process_list: !config.enable_process_list })}
+               role="button" tabindex="0"
+               onkeydown={e => e.key === 'Enter' && save({ enable_process_list: !config.enable_process_list })}>
+            <span style="font-size:13px;color:var(--ink-2)">Process monitoring</span>
+            <div style="width:36px;height:20px;border-radius:10px;position:relative;flex-shrink:0;transition:background 0.2s;background:{config.enable_process_list ? 'var(--accent-soft)' : 'var(--bg-2)'};border:1px solid {config.enable_process_list ? 'var(--accent-line)' : 'var(--line)'}">
+              <div style="position:absolute;top:2px;width:14px;height:14px;border-radius:50%;transition:left 0.2s,background 0.2s;left:{config.enable_process_list ? '18px' : '2px'};background:{config.enable_process_list ? 'var(--accent)' : 'var(--ink-4)'}"></div>
+            </div>
           </div>
         </div>
+      </section>
 
-        <div class="h-px bg-white/[0.06]"></div>
-
-        <!-- T-02: Process list toggle -->
-        <div>
-          <div class="text-[10px] text-slate-500 uppercase tracking-[0.15em] font-semibold mb-2">Processes</div>
-          <button
-            onclick={() => saveConfig({ enable_process_list: !config.enable_process_list })}
-            class="w-full flex items-center justify-between px-3 py-2 rounded-lg bg-white/[0.03] border border-white/[0.05]
-                   hover:bg-white/[0.06] transition-colors cursor-pointer"
-          >
-            <span class="text-[12px] text-slate-300">Enable process list</span>
-            <div class="w-8 h-4 rounded-full transition-colors relative flex-shrink-0 {config.enable_process_list ? 'bg-cyan-500/40' : 'bg-white/[0.08]'}">
-              <div class="absolute top-0.5 w-3 h-3 rounded-full transition-all {config.enable_process_list ? 'left-4 bg-cyan-400' : 'left-0.5 bg-slate-500'}"></div>
+      <!-- Alerts -->
+      <section>
+        <div class="eyebrow" style="margin-bottom:14px">Alerts</div>
+        <div style="display:flex;flex-direction:column;gap:16px">
+          <!-- CPU threshold -->
+          <div>
+            <div style="display:flex;justify-content:space-between;margin-bottom:6px">
+              <span style="font-size:12px;color:var(--ink-2)">CPU threshold</span>
+              <span class="tnum font-mono" style="font-size:12px;color:var(--accent)">{config.alert_cpu.toFixed(0)}%</span>
             </div>
+            <input type="range" min="50" max="100" step="1" value={config.alert_cpu}
+                   oninput={e => config.alert_cpu = parseFloat((e.target as HTMLInputElement).value)}
+                   onchange={e => save({ alert_cpu: parseFloat((e.target as HTMLInputElement).value) })}
+                   style="width:100%;accent-color:var(--accent)" />
+          </div>
+          <!-- RAM threshold -->
+          <div>
+            <div style="display:flex;justify-content:space-between;margin-bottom:6px">
+              <span style="font-size:12px;color:var(--ink-2)">Memory threshold</span>
+              <span class="tnum font-mono" style="font-size:12px;color:var(--accent)">{config.alert_ram.toFixed(0)}%</span>
+            </div>
+            <input type="range" min="50" max="100" step="1" value={config.alert_ram}
+                   oninput={e => config.alert_ram = parseFloat((e.target as HTMLInputElement).value)}
+                   onchange={e => save({ alert_ram: parseFloat((e.target as HTMLInputElement).value) })}
+                   style="width:100%;accent-color:var(--accent)" />
+          </div>
+          <!-- Slack webhook -->
+          <div>
+            <div style="font-size:12px;color:var(--ink-2);margin-bottom:6px">Slack webhook URL</div>
+            <div style="display:flex;gap:8px">
+              <input type="url" bind:value={webhookInput}
+                     placeholder="https://hooks.slack.com/…"
+                     class="font-mono focus-ring"
+                     style="flex:1;background:var(--bg-2);border:1px solid var(--line);border-radius:8px;padding:8px 10px;font-size:11px;color:var(--ink);outline:none;min-width:0" />
+              <button onclick={() => save({ slack_webhook: webhookInput || null })}
+                      disabled={saving} class="btn" style="flex-shrink:0">Save</button>
+            </div>
+            {#if config.slack_webhook}
+              <div style="font-size:10px;color:var(--ok);margin-top:4px">Webhook active</div>
+            {/if}
+          </div>
+        </div>
+      </section>
+
+      <!-- Data -->
+      <section>
+        <div class="eyebrow" style="margin-bottom:14px">Data</div>
+        <div style="display:flex;flex-direction:column;gap:12px">
+          <div>
+            <div style="font-size:12px;color:var(--ink-2);margin-bottom:8px">Retention period</div>
+            <div class="seg-control">
+              {#each RETAIN as d}
+                <button class="seg-btn {config.retention_days === d ? 'active' : ''}"
+                        onclick={() => save({ retention_days: d })}>{d}d</button>
+              {/each}
+            </div>
+          </div>
+          <a href="/api/history/export?window=all" download="astral-history.csv"
+             style="font-size:12px;color:var(--accent);text-decoration:none;display:inline-flex;align-items:center;gap:4px">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+              <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/>
+              <polyline points="7 10 12 15 17 10"/>
+              <line x1="12" y1="15" x2="12" y2="3"/>
+            </svg>
+            Export CSV
+          </a>
+        </div>
+      </section>
+
+      <!-- Account -->
+      <section>
+        <div class="eyebrow" style="margin-bottom:14px">Account</div>
+        <div style="display:flex;flex-direction:column;gap:8px">
+          <button onclick={revokeAll} disabled={revoking}
+                  style="padding:9px 14px;border-radius:8px;border:1px solid rgba(244,63,94,0.3);background:var(--crit-soft);color:var(--crit);font-size:12px;font-weight:500;cursor:pointer;text-align:left;font-family:inherit;transition:opacity 0.15s"
+                  class:opacity-50={revoking}>
+            {revoking ? 'Revoking…' : 'Revoke all sessions'}
+          </button>
+          <button onclick={() => { onClose(); onLogout(); }}
+                  style="padding:9px 14px;border-radius:8px;border:1px solid rgba(244,63,94,0.2);background:transparent;color:var(--crit);font-size:12px;font-weight:500;cursor:pointer;text-align:left;font-family:inherit;opacity:0.85">
+            Sign out
           </button>
         </div>
-
-        <div class="h-px bg-white/[0.06]"></div>
-
-        <!-- T-03: Alert thresholds -->
-        <div>
-          <div class="text-[10px] text-slate-500 uppercase tracking-[0.15em] font-semibold mb-2">Alert Thresholds</div>
-          <div class="space-y-2">
-            <div class="flex items-center gap-2">
-              <span class="text-[11px] text-slate-400 w-14 flex-shrink-0">CPU %</span>
-              <input
-                type="number"
-                min="1" max="100"
-                bind:value={config.alert_cpu}
-                class="flex-1 bg-white/[0.04] border border-white/[0.08] rounded-lg px-2 py-1 text-[12px] text-slate-200
-                       font-mono focus:outline-none focus:border-cyan-500/40 focus:bg-white/[0.06]"
-              />
-              <button
-                onclick={() => saveConfig({ alert_cpu: config.alert_cpu })}
-                disabled={saving}
-                class="px-2 py-1 text-[10px] font-semibold rounded-lg bg-cyan-500/10 border border-cyan-500/20
-                       text-cyan-300 hover:bg-cyan-500/20 transition-colors cursor-pointer disabled:opacity-50"
-              >Save</button>
-            </div>
-            <div class="flex items-center gap-2">
-              <span class="text-[11px] text-slate-400 w-14 flex-shrink-0">RAM %</span>
-              <input
-                type="number"
-                min="1" max="100"
-                bind:value={config.alert_ram}
-                class="flex-1 bg-white/[0.04] border border-white/[0.08] rounded-lg px-2 py-1 text-[12px] text-slate-200
-                       font-mono focus:outline-none focus:border-cyan-500/40 focus:bg-white/[0.06]"
-              />
-              <button
-                onclick={() => saveConfig({ alert_ram: config.alert_ram })}
-                disabled={saving}
-                class="px-2 py-1 text-[10px] font-semibold rounded-lg bg-cyan-500/10 border border-cyan-500/20
-                       text-cyan-300 hover:bg-cyan-500/20 transition-colors cursor-pointer disabled:opacity-50"
-              >Save</button>
-            </div>
-          </div>
-        </div>
-
-        <div class="h-px bg-white/[0.06]"></div>
-
-        <!-- T-15: Data retention -->
-        <div>
-          <div class="text-[10px] text-slate-500 uppercase tracking-[0.15em] font-semibold mb-2">Data Retention</div>
-          <div class="flex gap-1.5">
-            {#each retentionOptions as opt}
-              <button
-                onclick={() => saveConfig({ retention_days: opt.value })}
-                class="flex-1 px-2 py-1.5 text-[11px] font-semibold rounded-lg transition-all duration-200 cursor-pointer
-                       {config.retention_days === opt.value
-                         ? 'bg-cyan-500/15 text-cyan-300 border border-cyan-500/20'
-                         : 'text-slate-500 bg-white/[0.03] border border-white/[0.05] hover:text-slate-300 hover:bg-white/[0.06]'}"
-              >{opt.label}</button>
-            {/each}
-          </div>
-        </div>
-
-        <div class="h-px bg-white/[0.06]"></div>
-
-        <!-- T-17: Slack webhook -->
-        <div>
-          <div class="text-[10px] text-slate-500 uppercase tracking-[0.15em] font-semibold mb-2">Slack Alerts</div>
-          <div class="flex gap-1.5">
-            <input
-              type="url"
-              placeholder="https://hooks.slack.com/…"
-              bind:value={slackWebhookInput}
-              class="flex-1 bg-white/[0.04] border border-white/[0.08] rounded-lg px-2 py-1.5 text-[11px] text-slate-300
-                     font-mono focus:outline-none focus:border-cyan-500/40 focus:bg-white/[0.06] placeholder:text-slate-700"
-            />
-            <button
-              onclick={() => saveConfig({ slack_webhook: slackWebhookInput })}
-              disabled={saving}
-              class="px-2 py-1.5 text-[10px] font-semibold rounded-lg bg-cyan-500/10 border border-cyan-500/20
-                     text-cyan-300 hover:bg-cyan-500/20 transition-colors cursor-pointer disabled:opacity-50 flex-shrink-0"
-            >Save</button>
-          </div>
-          {#if config.slack_webhook}
-            <p class="text-[10px] text-emerald-600 mt-1.5">Webhook active</p>
-          {/if}
-          {#if saveError}
-            <p class="text-[10px] text-rose-500 mt-1">{saveError}</p>
-          {/if}
-        </div>
-
-        <div class="h-px bg-white/[0.06]"></div>
-
-        <!-- Sign out -->
-        <button
-          onclick={() => { open = false; onLogout(); }}
-          class="w-full flex items-center gap-2 px-3 py-2 text-[12px] text-slate-400 hover:text-rose-400
-                 hover:bg-rose-500/5 rounded-lg transition-colors cursor-pointer"
-        >
-          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1" />
-          </svg>
-          Sign out
-        </button>
-      </div>
+      </section>
     </div>
-  {/if}
-</div>
+
+    <!-- Footer -->
+    <div style="padding:16px 24px;border-top:1px solid var(--line);display:flex;align-items:center;justify-content:space-between;flex-shrink:0">
+      <span class="font-mono" style="font-size:11px;color:var(--ink-4)">Astral v1.1.0</span>
+      <button onclick={onClose} class="btn btn-primary">Done</button>
+    </div>
+  </div>
+{/if}

@@ -1,320 +1,224 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import uPlot from 'uplot';
-  import 'uplot/dist/uPlot.min.css';
   import type { MetricPoint } from '../types';
 
-  let window = $state('6h');
-  let metricView = $state<'perf' | 'network' | 'disk'>('perf');
-  let chartContainer: HTMLDivElement;
-  let chart: uPlot | null = $state(null);
-  let interval: ReturnType<typeof setInterval>;
-  let hasData = $state(false);
-  let isLoading = $state(true);
+  let { totalMemory }: { totalMemory: number } = $props();
 
-  const windows = [
-    { id: '6h', label: '6H' },
+  type MetricKey = 'cpu' | 'mem' | 'net' | 'disk';
+  type WindowKey = '6h' | '24h' | '7d' | 'all';
+
+  let metricKey = $state<MetricKey>('cpu');
+  let windowKey = $state<WindowKey>('6h');
+  let data: MetricPoint[] = $state([]);
+  let isLoading = $state(true);
+  let containerEl: HTMLDivElement;
+  let containerW = $state(600);
+  let containerH = $state(220);
+  let fetchInterval: ReturnType<typeof setInterval>;
+
+  const METRICS: Record<MetricKey, {
+    label: string; color: string; unit: string;
+    fixedMax: number | null; fmt: (v: number) => string;
+  }> = {
+    cpu:  { label: 'CPU',      color: 'var(--accent)', unit: '%',    fixedMax: 100,  fmt: v => v.toFixed(1) + '%' },
+    mem:  { label: 'Memory',   color: 'var(--warm)',   unit: '%',    fixedMax: 100,  fmt: v => v.toFixed(1) + '%' },
+    net:  { label: 'Network',  color: 'var(--accent)', unit: 'MB/s', fixedMax: null, fmt: v => v.toFixed(2) + ' MB/s' },
+    disk: { label: 'Disk I/O', color: 'var(--warm)',   unit: 'MB/s', fixedMax: null, fmt: v => v.toFixed(2) + ' MB/s' },
+  };
+
+  const WINDOWS: { id: WindowKey; label: string }[] = [
+    { id: '6h',  label: '6H'  },
     { id: '24h', label: '24H' },
-    { id: '7d', label: '7D' },
+    { id: '7d',  label: '7D'  },
     { id: 'all', label: 'All' },
   ];
 
-  const views = [
-    { id: 'perf', label: 'CPU & Mem' },
-    { id: 'network', label: 'Network' },
-    { id: 'disk', label: 'Disk I/O' },
-  ];
-
-  // Legend config per view — T-06: always-visible static legend.
-  const legendConfig = {
-    perf: [
-      { color: '#a855f7', label: 'CPU %' },
-      { color: '#06b6d4', label: 'Memory' },
-    ],
-    network: [
-      { color: '#a855f7', label: 'TX' },
-      { color: '#06b6d4', label: 'RX' },
-    ],
-    disk: [
-      { color: '#06b6d4', label: 'Read' },
-      { color: '#f59e0b', label: 'Write' },
-    ],
-  };
-
-  function formatBytes(bytes: number): string {
-    if (bytes === 0) return '0 B';
-    const k = 1024;
-    const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
-    const i = Math.floor(Math.log(bytes) / Math.log(k));
-    return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+  function extractValue(p: MetricPoint, key: MetricKey): number {
+    switch (key) {
+      case 'cpu':  return p.cpu_usage;
+      case 'mem':  return totalMemory > 0 ? (p.used_memory / totalMemory) * 100 : 0;
+      case 'net':  return (p.network_tx + p.network_rx) / 1e6;
+      case 'disk': return (p.disk_read_rate + p.disk_write_rate) / 1e6;
+    }
   }
 
-  function buildChartOptions(view: string): uPlot.Options {
-    const baseAxes: uPlot.Axis[] = [
-      {
-        stroke: 'rgba(148,163,184,0.4)',
-        grid: { stroke: 'rgba(255,255,255,0.03)', width: 1 },
-        ticks: { stroke: 'rgba(255,255,255,0.05)', width: 1 },
-        font: "11px 'Inter', sans-serif",
-        space: 80,
-        values: (u, vals) =>
-          vals.map(v => new Date(v * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })),
-      },
-    ];
+  let values   = $derived(data.map(p => extractValue(p, metricKey)));
+  let nowVal   = $derived(values.length ? values[values.length - 1] : 0);
+  let avgVal   = $derived(values.length ? values.reduce((a, b) => a + b, 0) / values.length : 0);
+  let peakVal  = $derived(values.length ? Math.max(...values) : 0);
 
-    if (view === 'perf') {
-      return {
-        width: chartContainer?.clientWidth ?? 600,
-        height: chartContainer?.clientHeight ?? 300,
-        padding: [16, 8, 0, 0],
-        cursor: { show: true, x: true, y: false },
-        legend: { show: false },
-        series: [
-          { value: (u, v) => (v == null ? '-' : new Date(v * 1000).toLocaleTimeString()) },
-          {
-            label: 'CPU',
-            stroke: '#a855f7',
-            width: 1.5,
-            scale: '%',
-            fill: 'rgba(168,85,247,0.06)',
-            value: (u, v) => (v == null ? '-' : v.toFixed(1) + '%'),
-          },
-          {
-            label: 'Memory',
-            stroke: '#06b6d4',
-            width: 1.5,
-            scale: 'bytes',
-            fill: 'rgba(6,182,212,0.06)',
-            value: (u, v) => (v == null ? '-' : (v / 1073741824).toFixed(2) + ' GB'),
-          },
-        ],
-        axes: [
-          ...baseAxes,
-          {
-            scale: '%',
-            stroke: 'rgba(168,85,247,0.5)',
-            values: (u, vals) => vals.map(v => +v.toFixed(0) + '%'),
-            grid: { stroke: 'rgba(255,255,255,0.03)', width: 1 },
-            ticks: { stroke: 'rgba(255,255,255,0.05)', width: 1 },
-            font: "11px 'JetBrains Mono', monospace",
-            size: 48,
-          },
-          {
-            scale: 'bytes',
-            stroke: 'rgba(6,182,212,0.5)',
-            values: (u, vals) => vals.map(v => (v / 1073741824).toFixed(1) + 'G'),
-            side: 1,
-            grid: { show: false },
-            ticks: { stroke: 'rgba(255,255,255,0.05)', width: 1 },
-            font: "11px 'JetBrains Mono', monospace",
-            size: 48,
-          },
-        ],
-        scales: { '%': { auto: true, range: [0, 100] }, bytes: { auto: true } },
-      };
-    }
+  const PAD_L = 54, PAD_R = 12, PAD_T = 14, PAD_B = 24;
 
-    // network and disk share a single bytes/s scale
-    const [s1Color, s2Color] = view === 'network' ? ['#a855f7', '#06b6d4'] : ['#06b6d4', '#f59e0b'];
-    const [s1Label, s2Label] = view === 'network' ? ['TX', 'RX'] : ['Read', 'Write'];
+  let plotW = $derived(Math.max(containerW - PAD_L - PAD_R, 1));
+  let plotH = $derived(Math.max(containerH - PAD_T - PAD_B, 1));
 
+  let maxVal = $derived.by(() => {
+    const cfg = METRICS[metricKey];
+    if (cfg.fixedMax !== null) return cfg.fixedMax;
+    const m = Math.max(...values, 0.001);
+    const mag = Math.pow(10, Math.floor(Math.log10(m)));
+    return Math.ceil(m / mag) * mag;
+  });
+
+  let gridLines = $derived(
+    Array.from({ length: 5 }, (_, i) => ({
+      y: PAD_T + (i / 4) * plotH,
+      val: maxVal * (1 - i / 4),
+    }))
+  );
+
+  let svgPath = $derived.by(() => {
+    if (values.length < 2) return { line: '', area: '', dotX: 0, dotY: PAD_T };
+    const n = values.length;
+    const pts = values.map((v, i) => ({
+      x: PAD_L + (i / (n - 1)) * plotW,
+      y: PAD_T + (1 - Math.min(v, maxVal) / maxVal) * plotH,
+    }));
+    const coords = pts.map(p => `${p.x.toFixed(1)},${p.y.toFixed(1)}`).join(' L ');
+    const last = pts[pts.length - 1];
     return {
-      width: chartContainer?.clientWidth ?? 600,
-      height: chartContainer?.clientHeight ?? 300,
-      padding: [16, 8, 0, 0],
-      cursor: { show: true, x: true, y: false },
-      legend: { show: false },
-      series: [
-        { value: (u, v) => (v == null ? '-' : new Date(v * 1000).toLocaleTimeString()) },
-        {
-          label: s1Label,
-          stroke: s1Color,
-          width: 1.5,
-          scale: 'bps',
-          fill: s1Color + '10',
-          value: (u, v) => (v == null ? '-' : formatBytes(v) + '/s'),
-        },
-        {
-          label: s2Label,
-          stroke: s2Color,
-          width: 1.5,
-          scale: 'bps',
-          fill: s2Color + '10',
-          value: (u, v) => (v == null ? '-' : formatBytes(v) + '/s'),
-        },
-      ],
-      axes: [
-        ...baseAxes,
-        {
-          scale: 'bps',
-          stroke: 'rgba(148,163,184,0.4)',
-          values: (u, vals) => vals.map(v => formatBytes(v) + '/s'),
-          grid: { stroke: 'rgba(255,255,255,0.03)', width: 1 },
-          ticks: { stroke: 'rgba(255,255,255,0.05)', width: 1 },
-          font: "11px 'JetBrains Mono', monospace",
-          size: 64,
-        },
-      ],
-      scales: { bps: { auto: true } },
+      line: `M ${coords}`,
+      area: `M ${coords} L ${(PAD_L + plotW).toFixed(1)},${(PAD_T + plotH).toFixed(1)} L ${PAD_L},${(PAD_T + plotH).toFixed(1)} Z`,
+      dotX: last.x,
+      dotY: last.y,
     };
-  }
+  });
 
-  function buildChartData(data: MetricPoint[], view: string): uPlot.AlignedData {
-    const ts = data.map(d => d.timestamp);
-    if (view === 'perf') {
-      return [ts, data.map(d => d.cpu_usage), data.map(d => d.used_memory)];
-    }
-    if (view === 'network') {
-      return [ts, data.map(d => d.network_tx), data.map(d => d.network_rx)];
-    }
-    // disk
-    return [ts, data.map(d => d.disk_read_rate), data.map(d => d.disk_write_rate)];
-  }
-
-  function destroyChart() {
-    if (chart) {
-      chart.destroy();
-      chart = null;
-    }
-  }
+  let xLabels = $derived.by(() => {
+    if (data.length < 2) return [] as { x: number; label: string }[];
+    const n = data.length;
+    return Array.from({ length: 5 }, (_, i) => {
+      const idx = Math.round(i * (n - 1) / 4);
+      const ts = data[idx].timestamp;
+      const d = new Date(ts * 1000);
+      const label = windowKey === '7d'
+        ? d.toLocaleDateString([], { weekday: 'short' })
+        : d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      return { x: PAD_L + (idx / (n - 1)) * plotW, label };
+    });
+  });
 
   async function fetchData() {
+    isLoading = true;
     try {
-      isLoading = true;
-      const res = await fetch(`/api/history?window=${window}`);
-      if (!res.ok) return;
-      const raw: MetricPoint[] = await res.json();
-
-      if (!raw || raw.length === 0) {
-        hasData = false;
-        destroyChart();
-        return;
-      }
-
-      hasData = true;
-      const chartData = buildChartData(raw, metricView);
-
-      if (chart) {
-        chart.setData(chartData);
-      } else {
-        destroyChart();
-        const opts = buildChartOptions(metricView);
-        chart = new uPlot(opts, chartData, chartContainer);
-      }
-    } catch (e) {
-      console.error('Failed to fetch history:', e);
-    } finally {
+      const res = await fetch(`/api/history?window=${windowKey}`);
+      if (res.ok) data = await res.json();
+    } catch { /**/ } finally {
       isLoading = false;
     }
   }
 
-  function setWindow(w: string) {
-    window = w;
+  $effect(() => {
+    // Re-fetch when window changes; metric change only affects derived values
+    const wk = windowKey;
+    void wk;
     fetchData();
-  }
-
-  function setView(v: typeof metricView) {
-    metricView = v;
-    destroyChart();
-    fetchData();
-  }
-
-  // T-16: CSV export
-  function exportCSV() {
-    const url = `/api/history/export?window=${window}`;
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `astral-history-${window}.csv`;
-    a.click();
-  }
+  });
 
   onMount(() => {
-    fetchData();
-    interval = setInterval(fetchData, 60000);
-
-    const resizeObserver = new ResizeObserver(() => {
-      if (chart && chartContainer) {
-        chart.setSize({
-          width: chartContainer.clientWidth,
-          height: chartContainer.clientHeight,
-        });
+    const ro = new ResizeObserver(entries => {
+      for (const e of entries) {
+        containerW = e.contentRect.width;
+        containerH = e.contentRect.height;
       }
     });
-    if (chartContainer) resizeObserver.observe(chartContainer);
-
-    return () => {
-      clearInterval(interval);
-      resizeObserver.disconnect();
-      destroyChart();
-    };
+    if (containerEl) ro.observe(containerEl);
+    fetchInterval = setInterval(fetchData, 60000);
+    return () => { clearInterval(fetchInterval); ro.disconnect(); };
   });
+
+  function fmtStat(v: number): string {
+    return METRICS[metricKey].fmt(v);
+  }
 </script>
 
-<div class="glass-panel p-6 h-full flex flex-col">
+<div class="surface h-full flex flex-col" style="padding:18px 20px">
   <!-- Header row -->
-  <div class="flex flex-wrap justify-between items-center gap-3 mb-4 flex-shrink-0">
-    <div class="flex items-center gap-3">
-      <h3 class="text-[11px] font-bold text-slate-300 uppercase tracking-[0.15em]">History</h3>
-      <!-- T-08/T-09: metric view selector -->
-      <div class="flex bg-white/[0.03] rounded-xl p-1 border border-white/[0.05]">
-        {#each views as v}
-          <button
-            class="px-2.5 py-1 text-[10px] font-semibold rounded-lg transition-all duration-200 cursor-pointer
-                   {metricView === v.id ? 'bg-white/[0.08] text-white shadow-sm' : 'text-slate-500 hover:text-slate-300'}"
-            onclick={() => setView(v.id as typeof metricView)}
-          >{v.label}</button>
-        {/each}
-      </div>
+  <div class="flex flex-wrap items-center gap-3 mb-4 flex-shrink-0">
+    <span class="eyebrow">History</span>
+
+    <!-- Metric tabs -->
+    <div class="seg-control">
+      {#each Object.entries(METRICS) as [key, cfg]}
+        <button class="seg-btn {metricKey === key ? 'active' : ''}"
+                onclick={() => metricKey = key as MetricKey}>{cfg.label}</button>
+      {/each}
     </div>
 
-    <div class="flex items-center gap-2">
-      <!-- Time window selector -->
-      <div class="flex bg-white/[0.03] rounded-xl p-1 border border-white/[0.05]">
-        {#each windows as w}
-          <button
-            class="px-3 py-1 text-[11px] font-semibold rounded-lg transition-all duration-200 cursor-pointer
-                   {window === w.id ? 'bg-white/[0.08] text-white shadow-sm' : 'text-slate-500 hover:text-slate-300'}"
-            onclick={() => setWindow(w.id)}
-          >{w.label}</button>
+    <!-- Stats -->
+    {#if values.length > 0}
+      <div class="flex items-center gap-5 ml-1">
+        {#each [['now', nowVal], ['avg', avgVal], ['peak', peakVal]] as [lbl, val]}
+          <div class="flex flex-col">
+            <span class="eyebrow" style="font-size:9px;margin-bottom:1px">{lbl}</span>
+            <span class="tnum font-mono" style="font-size:12px;color:var(--ink)">{fmtStat(val as number)}</span>
+          </div>
         {/each}
-      </div>
-
-      <!-- T-16: export button -->
-      <button
-        onclick={exportCSV}
-        title="Export CSV"
-        class="flex items-center justify-center w-7 h-7 rounded-lg bg-white/[0.04] border border-white/[0.06]
-               hover:bg-white/[0.08] hover:border-white/[0.1] transition-all cursor-pointer"
-      >
-        <svg class="w-3.5 h-3.5 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-        </svg>
-      </button>
-    </div>
-  </div>
-
-  <!-- T-06: static legend — always shows color swatches + labels, no dashes -->
-  <div class="flex items-center gap-5 mb-3 flex-shrink-0">
-    {#each legendConfig[metricView] as entry}
-      <div class="flex items-center gap-1.5">
-        <div class="w-4 h-0.5 rounded-full" style="background:{entry.color}"></div>
-        <span class="text-[11px] text-slate-500">{entry.label}</span>
-      </div>
-    {/each}
-  </div>
-
-  <!-- Chart area -->
-  <div class="flex-1 min-h-0 relative">
-    <div bind:this={chartContainer} class="absolute inset-0"></div>
-    {#if !hasData && !isLoading}
-      <div class="absolute inset-0 flex items-center justify-center text-slate-500 text-sm pointer-events-none">
-        No data available for this period
       </div>
     {/if}
-    {#if isLoading && !chart}
-      <div class="absolute inset-0 flex items-center justify-center text-slate-500 text-sm pointer-events-none">
-        Loading…
-      </div>
+
+    <!-- Window tabs -->
+    <div class="seg-control ml-auto">
+      {#each WINDOWS as w}
+        <button class="seg-btn {windowKey === w.id ? 'active' : ''}"
+                onclick={() => windowKey = w.id as WindowKey}>{w.label}</button>
+      {/each}
+    </div>
+  </div>
+
+  <!-- Chart -->
+  <div class="flex-1 min-h-0 relative" bind:this={containerEl}
+       bind:clientWidth={containerW} bind:clientHeight={containerH}>
+    {#if isLoading}
+      <div class="absolute inset-0 flex items-center justify-center"
+           style="color:var(--ink-4);font-size:12px">Loading…</div>
+    {:else if data.length < 2}
+      <div class="absolute inset-0 flex items-center justify-center"
+           style="color:var(--ink-4);font-size:12px">No data for this period</div>
+    {:else}
+      <svg width={containerW} height={containerH} style="display:block">
+        <defs>
+          <linearGradient id="cgrad-{metricKey}" x1="0" x2="0" y1="0" y2="1">
+            <stop offset="0%"   stop-color={METRICS[metricKey].color} stop-opacity="0.22"/>
+            <stop offset="100%" stop-color={METRICS[metricKey].color} stop-opacity="0.02"/>
+          </linearGradient>
+          <pattern id="chart-dots" x={PAD_L} y={PAD_T} width="16" height="16" patternUnits="userSpaceOnUse">
+            <circle cx="1" cy="1" r="0.8" fill="var(--line)"/>
+          </pattern>
+        </defs>
+
+        <!-- Dot grid -->
+        <rect x={PAD_L} y={PAD_T} width={plotW} height={plotH} fill="url(#chart-dots)" opacity="0.7"/>
+
+        <!-- Gridlines + Y labels -->
+        {#each gridLines as gl}
+          <line x1={PAD_L} y1={gl.y} x2={PAD_L + plotW} y2={gl.y}
+                stroke="var(--line)" stroke-width="1"/>
+          <text x={PAD_L - 5} y={gl.y + 3.5} text-anchor="end"
+                font-family="'Geist Mono', monospace" font-size="9"
+                fill="var(--ink-4)">{METRICS[metricKey].fmt(gl.val)}</text>
+        {/each}
+
+        <!-- Area fill -->
+        <path d={svgPath.area} fill="url(#cgrad-{metricKey})"/>
+
+        <!-- Line -->
+        <path d={svgPath.line} fill="none"
+              stroke={METRICS[metricKey].color} stroke-width="1.5"
+              stroke-linecap="round" stroke-linejoin="round"/>
+
+        <!-- Animated leading dot -->
+        <circle cx={svgPath.dotX} cy={svgPath.dotY} r="3"
+                fill={METRICS[metricKey].color}
+                style="animation:pulseDot 2s ease-in-out infinite"/>
+
+        <!-- X-axis labels -->
+        {#each xLabels as xl}
+          <text x={xl.x} y={PAD_T + plotH + 17} text-anchor="middle"
+                font-family="'Geist Mono', monospace" font-size="9"
+                fill="var(--ink-4)">{xl.label}</text>
+        {/each}
+      </svg>
     {/if}
   </div>
 </div>

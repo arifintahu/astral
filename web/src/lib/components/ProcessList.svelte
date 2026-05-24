@@ -1,92 +1,95 @@
 <script lang="ts">
   import type { ProcessInfo } from '../types';
 
-  let { processes, totalMemory }: { processes: ProcessInfo[], totalMemory: number } = $props();
+  let { processes, totalMemory }: { processes: ProcessInfo[]; totalMemory: number } = $props();
 
   let sortBy = $state<'cpu' | 'mem'>('cpu');
 
-  let hasProcesses = $derived(processes && processes.length > 0);
-
   let sorted = $derived(
-    [...processes].sort((a, b) =>
-      sortBy === 'cpu' ? b.cpu_usage - a.cpu_usage : b.memory - a.memory
-    ).slice(0, 10)
+    [...processes]
+      .sort((a, b) => sortBy === 'cpu' ? b.cpu_usage - a.cpu_usage : b.memory - a.memory)
+      .slice(0, 8)
   );
 
-  function formatBytes(bytes: number): string {
-    if (bytes === 0) return '0 B';
-    const k = 1024;
-    const sizes = ['B', 'KB', 'MB', 'GB', 'TB'];
-    const i = Math.floor(Math.log(bytes) / Math.log(k));
-    return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+  let maxCpu = $derived(Math.max(...sorted.map(p => p.cpu_usage), 0.001));
+  let maxMem = $derived(Math.max(...sorted.map(p => p.memory), 1));
+
+  function fmtMem(b: number): string {
+    if (b >= 1073741824) return (b / 1073741824).toFixed(1) + 'G';
+    if (b >= 1048576)    return (b / 1048576).toFixed(0) + 'M';
+    return (b / 1024).toFixed(0) + 'K';
   }
 
-  function cpuColor(pct: number): string {
-    if (pct > 80) return 'text-rose-400';
-    if (pct > 50) return 'text-amber-400';
-    return 'text-slate-400';
+  function cpuColor(v: number): string {
+    if (v >= 50) return 'var(--crit)';
+    if (v >= 20) return 'var(--warm)';
+    return 'var(--ink-2)';
   }
 </script>
 
-<div class="glass-panel p-6 h-full flex flex-col">
-  <div class="flex justify-between items-center mb-4 flex-shrink-0">
-    <h3 class="text-[11px] font-bold text-slate-300 uppercase tracking-[0.15em]">Top Processes</h3>
-    {#if hasProcesses}
-      <div class="flex bg-white/[0.03] rounded-xl p-1 border border-white/[0.05]">
-        <button
-          class="px-3 py-1 text-[11px] font-semibold rounded-lg transition-all duration-200 cursor-pointer
-                 {sortBy === 'cpu' ? 'bg-white/[0.08] text-white shadow-sm' : 'text-slate-500 hover:text-slate-300'}"
-          onclick={() => sortBy = 'cpu'}
-        >CPU</button>
-        <button
-          class="px-3 py-1 text-[11px] font-semibold rounded-lg transition-all duration-200 cursor-pointer
-                 {sortBy === 'mem' ? 'bg-white/[0.08] text-white shadow-sm' : 'text-slate-500 hover:text-slate-300'}"
-          onclick={() => sortBy = 'mem'}
-        >Memory</button>
+<div class="surface h-full flex flex-col" style="padding:18px 20px">
+  <!-- Header -->
+  <div class="flex items-center justify-between mb-4 flex-shrink-0">
+    <span class="eyebrow">Top Processes</span>
+    {#if processes.length > 0}
+      <div class="seg-control">
+        <button class="seg-btn {sortBy === 'cpu' ? 'active' : ''}" onclick={() => sortBy = 'cpu'}>CPU</button>
+        <button class="seg-btn {sortBy === 'mem' ? 'active' : ''}" onclick={() => sortBy = 'mem'}>Mem</button>
       </div>
     {/if}
   </div>
 
-  <div class="flex-1 min-h-0 flex flex-col">
-    {#if hasProcesses}
-      <!-- Header -->
-      <div class="grid grid-cols-[1fr_80px_80px] gap-2 px-3 py-2 text-[10px] text-slate-600 uppercase tracking-wider font-semibold border-b border-white/[0.04] flex-shrink-0">
-        <span>Process</span>
-        <span class="text-right">CPU</span>
-        <span class="text-right">Memory</span>
+  {#if processes.length === 0}
+    <div class="flex-1 flex flex-col items-center justify-center gap-3 text-center" style="padding:0 12px">
+      <div style="width:40px;height:40px;border-radius:10px;background:var(--bg-2);border:1px solid var(--line);display:flex;align-items:center;justify-content:center">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--ink-4)" stroke-width="1.5">
+          <rect x="2" y="3" width="20" height="14" rx="2"/>
+          <line x1="8" y1="21" x2="16" y2="21"/>
+          <line x1="12" y1="17" x2="12" y2="21"/>
+        </svg>
       </div>
+      <div>
+        <div style="font-size:12px;color:var(--ink-3);font-weight:500;margin-bottom:4px">Process monitoring is off</div>
+        <div style="font-size:11px;color:var(--ink-4)">Enable in Settings → Processes</div>
+      </div>
+    </div>
+  {:else}
+    <!-- Column headers -->
+    <div style="display:grid;grid-template-columns:1fr 60px 80px 70px;gap:8px;padding:2px 6px 6px;flex-shrink:0">
+      <span class="eyebrow" style="font-size:9px">Process</span>
+      <span class="eyebrow" style="font-size:9px;text-align:right">PID</span>
+      <span class="eyebrow" style="font-size:9px;text-align:right">CPU</span>
+      <span class="eyebrow" style="font-size:9px;text-align:right">Memory</span>
+    </div>
 
-      <!-- Rows -->
-      <div class="overflow-y-auto custom-scrollbar flex-1 min-h-0">
-        {#each sorted as proc, i}
-          <div class="grid grid-cols-[1fr_80px_80px] gap-2 px-3 py-2 items-center hover:bg-white/[0.02] transition-colors rounded-lg">
-            <div class="flex items-center gap-2 min-w-0">
-              <span class="text-[10px] text-slate-700 font-mono tabular-nums w-5 flex-shrink-0">{i + 1}</span>
-              <span class="text-[13px] text-slate-300 truncate font-medium" title="{proc.name} (PID: {proc.pid})">{proc.name}</span>
-            </div>
-            <div class="text-right">
-              <span class="text-[13px] font-mono tabular-nums font-medium {cpuColor(proc.cpu_usage)}">{proc.cpu_usage.toFixed(1)}%</span>
-            </div>
-            <div class="text-right">
-              <span class="text-[13px] font-mono tabular-nums text-slate-400">{formatBytes(proc.memory)}</span>
+    <!-- Rows -->
+    <div class="flex-1 min-h-0 overflow-y-auto nice-scroll">
+      {#each sorted as proc, i}
+        <div style="display:grid;grid-template-columns:1fr 60px 80px 70px;gap:8px;padding:5px 6px;border-radius:6px;align-items:center;cursor:default"
+             class="card-hover">
+          <!-- Name + rank -->
+          <div class="flex items-center gap-2 min-w-0">
+            <span class="tnum font-mono flex-shrink-0" style="font-size:10px;color:var(--ink-4);width:14px">{i+1}</span>
+            <span style="font-size:12px;color:var(--ink-2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="{proc.name}">{proc.name}</span>
+          </div>
+          <!-- PID -->
+          <div class="tnum font-mono text-right" style="font-size:11px;color:var(--ink-4)">{proc.pid}</div>
+          <!-- CPU -->
+          <div class="flex flex-col items-end gap-0.5">
+            <span class="tnum font-mono" style="font-size:11px;color:{cpuColor(proc.cpu_usage)}">{proc.cpu_usage.toFixed(1)}%</span>
+            <div style="width:100%;height:2px;background:var(--bg-2);border-radius:1px;overflow:hidden">
+              <div style="width:{(proc.cpu_usage / maxCpu) * 100}%;height:100%;background:var(--accent);border-radius:1px;transition:width 0.4s"></div>
             </div>
           </div>
-        {/each}
-      </div>
-
-    {:else}
-      <!-- T-01: empty state when process collection is disabled -->
-      <div class="flex-1 flex flex-col items-center justify-center text-center px-4 gap-3">
-        <div class="w-12 h-12 rounded-2xl bg-white/[0.03] border border-white/[0.06] flex items-center justify-center">
-          <svg class="w-6 h-6 text-slate-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 3H5a2 2 0 00-2 2v4m6-6h10a2 2 0 012 2v4M9 3v18m0 0h10a2 2 0 002-2V9M9 21H5a2 2 0 01-2-2V9m0 0h18" />
-          </svg>
+          <!-- Memory -->
+          <div class="flex flex-col items-end gap-0.5">
+            <span class="tnum font-mono" style="font-size:11px;color:var(--ink-2)">{fmtMem(proc.memory)}</span>
+            <div style="width:100%;height:2px;background:var(--bg-2);border-radius:1px;overflow:hidden">
+              <div style="width:{(proc.memory / maxMem) * 100}%;height:100%;background:var(--warm);border-radius:1px;transition:width 0.4s"></div>
+            </div>
+          </div>
         </div>
-        <div>
-          <p class="text-[13px] text-slate-400 font-medium mb-1">Process monitoring is off</p>
-          <p class="text-[11px] text-slate-600 leading-relaxed">Enable it in <span class="text-slate-400">Settings → Processes</span> or start with <code class="text-cyan-600 bg-white/[0.04] px-1 rounded">--enable-process-list</code></p>
-        </div>
-      </div>
-    {/if}
-  </div>
+      {/each}
+    </div>
+  {/if}
 </div>

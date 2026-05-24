@@ -13,6 +13,7 @@ pub struct SystemMetrics {
     pub uptime: u64,
     pub cpu_usage: f32,
     pub cpu_cores: usize,
+    pub cpu_load: [f64; 3],
     pub total_memory: u64,
     pub used_memory: u64,
     pub total_swap: u64,
@@ -69,6 +70,7 @@ impl MetricsCollector {
 
         let cpu_usage = self.system.global_cpu_usage();
         let cpu_cores = self.system.cpus().len();
+        let load = System::load_average();
 
         let mut network_tx = 0u64;
         let mut network_rx = 0u64;
@@ -124,6 +126,7 @@ impl MetricsCollector {
             uptime: System::uptime(),
             cpu_usage,
             cpu_cores,
+            cpu_load: [load.one, load.five, load.fifteen],
             total_memory: self.system.total_memory(),
             used_memory: self.system.used_memory(),
             total_swap: self.system.total_swap(),
