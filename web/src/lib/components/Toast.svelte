@@ -1,48 +1,33 @@
 <script lang="ts">
   import type { AlertEvent } from '../types';
-
-  let { alerts, onDismiss }: { alerts: AlertEvent[], onDismiss: (index: number) => void } = $props();
+  let { alerts, onDismiss }: { alerts: AlertEvent[], onDismiss: (i: number) => void } = $props();
 </script>
 
 {#if alerts.length > 0}
-  <div class="fixed top-4 right-4 z-50 flex flex-col gap-3 max-w-sm">
+  <div style="position:fixed;top:16px;right:16px;z-index:60;display:flex;flex-direction:column;gap:10px;max-width:340px">
     {#each alerts as alert, i}
-      <div
-        class="animate-fade-in-up bg-slate-900/95 backdrop-blur-xl border rounded-xl p-4 shadow-2xl
-               {alert.kind === 'cpu' ? 'border-amber-500/30 shadow-amber-500/10' : 'border-rose-500/30 shadow-rose-500/10'}"
-      >
-        <div class="flex items-start gap-3">
+      {@const isCpu = alert.kind === 'cpu'}
+      <div class="surface anim-toast" style="padding:14px 16px;border-color:{isCpu ? 'var(--warm-line)' : 'rgba(244,63,94,0.3)'}">
+        <div style="display:flex;align-items:flex-start;gap:12px">
           <!-- Icon -->
-          <div class="flex-shrink-0 mt-0.5">
-            {#if alert.kind === 'cpu'}
-              <div class="w-8 h-8 rounded-lg bg-amber-500/10 border border-amber-500/20 flex items-center justify-center">
-                <svg class="w-4 h-4 text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z" />
-                </svg>
-              </div>
-            {:else}
-              <div class="w-8 h-8 rounded-lg bg-rose-500/10 border border-rose-500/20 flex items-center justify-center">
-                <svg class="w-4 h-4 text-rose-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z" />
-                </svg>
-              </div>
-            {/if}
+          <div style="width:28px;height:28px;border-radius:6px;flex-shrink:0;display:flex;align-items:center;justify-content:center;background:{isCpu ? 'var(--warm-soft)' : 'var(--crit-soft)'}">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
+                 stroke="{isCpu ? 'var(--warm)' : 'var(--crit)'}" stroke-width="2" stroke-linecap="round">
+              <path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/>
+              <line x1="12" y1="9" x2="12" y2="13"/>
+              <line x1="12" y1="17" x2="12.01" y2="17"/>
+            </svg>
           </div>
-
-          <div class="flex-1 min-w-0">
-            <div class="text-[11px] font-semibold uppercase tracking-wider {alert.kind === 'cpu' ? 'text-amber-400' : 'text-rose-400'} mb-0.5">
-              {alert.kind === 'cpu' ? 'CPU Alert' : 'Memory Alert'}
+          <div style="flex:1;min-width:0">
+            <div style="font-size:11px;font-weight:600;letter-spacing:0.1em;text-transform:uppercase;color:{isCpu ? 'var(--warm)' : 'var(--crit)'};margin-bottom:2px">
+              {isCpu ? 'CPU Alert' : 'Memory Alert'}
             </div>
-            <div class="text-sm text-slate-300">{alert.message}</div>
+            <div style="font-size:12px;color:var(--ink-2)">{alert.message}</div>
           </div>
-
-          <button
-            onclick={() => onDismiss(i)}
-            aria-label="Dismiss alert"
-            class="flex-shrink-0 text-slate-600 hover:text-slate-400 transition-colors cursor-pointer"
-          >
-            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+          <button onclick={() => onDismiss(i)} aria-label="Dismiss"
+                  style="color:var(--ink-4);background:none;border:none;cursor:pointer;padding:0;flex-shrink:0;display:flex">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+              <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
             </svg>
           </button>
         </div>

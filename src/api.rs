@@ -11,7 +11,7 @@ use axum::{
 };
 use futures::stream::Stream;
 use serde::{Deserialize, Serialize};
-use std::{collections::VecDeque, convert::Infallible, sync::Arc, time::Duration};
+use std::{collections::VecDeque, convert::Infallible, sync::Arc, time::{Duration, SystemTime, UNIX_EPOCH}};
 use tokio::sync::{broadcast, Mutex};
 use tokio_stream::wrappers::BroadcastStream;
 use tokio_stream::StreamExt;
@@ -47,6 +47,7 @@ pub struct AppState {
     pub alert_tx: broadcast::Sender<AlertEvent>,
     pub config: SharedConfig,
     pub alert_history: AlertHistory,
+    pub revoke_all_at: Arc<Mutex<u64>>,
 }
 
 pub fn app(state: AppState) -> Router {
@@ -57,6 +58,7 @@ pub fn app(state: AppState) -> Router {
         .route("/api/alerts", get(alerts_handler))
         .route("/api/alerts/history", get(alerts_history_handler))
         .route("/api/settings", get(get_settings_handler).post(post_settings_handler))
+        .route("/api/sessions/revoke", axum::routing::post(revoke_sessions_handler))
         .with_state(state)
 }
 
@@ -176,6 +178,15 @@ async fn history_handler(
             StatusCode::INTERNAL_SERVER_ERROR.into_response()
         }
     }
+}
+
+async fn revoke_sessions_handler(State(state): State<AppState>) -> impl IntoResponse {
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    *state.revoke_all_at.lock().await = now;
+    StatusCode::NO_CONTENT
 }
 
 async fn export_handler(
