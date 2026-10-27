@@ -31,7 +31,7 @@ Running `./benchmark.sh` on a standard development environment:
 | :--- | :--- |
 | **Binary Size** | 7.1M (7362848 bytes) |
 | **Execution Time** | 1.53ms (Time to Ready) |
-| **Peak Memory (RSS)** | 8.88 MB |
+| **Peak Memory (RSS)** | 13.48 MB (`VmHWM`, idle after 10s warmup; ~17 MB after a login + SSE stream) |
 
 ## Installation
 
