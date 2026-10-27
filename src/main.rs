@@ -9,7 +9,7 @@ use axum::{
 };
 use argon2::{
     password_hash::{rand_core::OsRng, PasswordHash, PasswordHasher, PasswordVerifier, SaltString},
-    Argon2,
+    Algorithm, Argon2, Params, Version,
 };
 use clap::Parser;
 use hmac::{Hmac, Mac};
@@ -133,7 +133,11 @@ async fn main() -> anyhow::Result<()> {
     };
 
     let salt = SaltString::generate(&mut OsRng);
-    let password_hash = Argon2::default()
+    // OWASP-listed profile (m=9 MiB, t=4, p=1): about half the memory of the
+    // crate default (19 MiB). Verification reads these params from the hash.
+    let params = Params::new(9 * 1024, 4, 1, None)
+        .map_err(|e| anyhow::anyhow!("Invalid Argon2 params: {}", e))?;
+    let password_hash = Argon2::new(Algorithm::Argon2id, Version::V0x13, params)
         .hash_password(password.as_bytes(), &salt)
         .map_err(|e| anyhow::anyhow!("Failed to hash password: {}", e))?
         .to_string();

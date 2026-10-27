@@ -78,9 +78,15 @@ if [ $PY_EXIT_CODE -ne 0 ]; then
     exit 1
 fi
 
-# Measure RSS now that it's running
-# ps -p PID -o rss returns size in KB
-RSS_KB=$(ps -p $SERVER_PID -o rss --no-headers)
+# Warm up so the reading covers the collector, DB pool and worker running,
+# not just the moment the port opens.
+sleep "${WARMUP_SECS:-10}"
+
+# Peak RSS (VmHWM, kB) from /proc; falls back to current RSS where /proc is unavailable
+RSS_KB=$(grep VmHWM "/proc/$SERVER_PID/status" 2>/dev/null | tr -s ' ' | cut -d' ' -f2)
+if [ -z "$RSS_KB" ]; then
+    RSS_KB=$(ps -p $SERVER_PID -o rss --no-headers 2>/dev/null | tr -d ' ')
+fi
 if [ -n "$RSS_KB" ]; then
     RSS_MB=$(echo "$RSS_KB" | awk '{printf "%.2f", $1/1024}')
 else
