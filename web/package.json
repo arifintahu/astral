@@ -11,9 +11,9 @@
   "devDependencies": {
     "@sveltejs/vite-plugin-svelte": "^7.3.1",
     "@tailwindcss/vite": "^4.3.5",
-    "autoprefixer": "^10.4.27",
-    "postcss": "^8.5.8",
-    "svelte": "^5.45.2",
+    "autoprefixer": "^10.6.2",
+    "postcss": "^8.5.32",
+    "svelte": "^5.57.3",
     "tailwindcss": "^4.3.5",
     "vite": "^8.3.6"
   }

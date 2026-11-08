@@ -21,12 +21,12 @@ sysinfo = "0.36.1"
 tokio = { version = "1.50.0", features = ["full"] }
 tokio-stream = { version = "0.1.18", features = ["sync"] }
 tower = "0.5.3"
-tower-http = { version = "0.6.8", features = ["fs", "trace", "cors"] }
+tower-http = { version = "0.7.1", features = ["fs", "trace", "cors"] }
 tracing = "0.1.44"
 tracing-subscriber = "0.3.22"
 uuid = { version = "1.22.0", features = ["v4", "fast-rng"] }
-hmac = "0.12"
-sha2 = "0.10"
+hmac = "0.13"
+sha2 = "0.11"
 hex = "0.4"
 
 [target.'cfg(all(target_os = "linux", target_env = "gnu"))'.dependencies]
