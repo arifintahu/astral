@@ -30,7 +30,7 @@ cargo clippy --all-targets -- -D warnings
 cargo test
 cd web && npm ci && npm run build   # the frontend type-check; there is no separate lint step
 node scripts/version.mjs check
-node --test scripts/release-notes.test.mjs
+node --test scripts/*.test.mjs
 ```
 
 ## Code style
@@ -92,7 +92,8 @@ git tag v1.2.0 && git push origin v1.2.0
 
 The Release workflow refuses a tag that disagrees with the files, builds binaries for Linux (amd64), Windows (amd64)
 and macOS (Apple Silicon), and publishes them with those notes. A tag with a suffix (`v1.2.0-rc.1`) is published as
-a pre-release.
+a pre-release, and only needs the files to be at the version it is a candidate for (1.2.0), so trying the workflow
+takes no version commit. A stable tag must match the files exactly. Delete a candidate's release and tag when done.
 
 ## License
 

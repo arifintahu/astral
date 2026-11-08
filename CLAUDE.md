@@ -55,7 +55,7 @@ Raw 1s samples → buffer averaged every 1m → `metrics_1m` → aggregated to `
 
 ### Repo, CI and releases
 - `scripts/version.mjs` — one version across `Cargo.toml`, `Cargo.lock`, `web/package.json` and `web/package-lock.json` (`set X.Y.Z` / `check`); bump only with this script.
-- `scripts/release-notes.mjs` — builds the GitHub release body from the `CHANGELOG.md` section plus the PRs and contributors since the previous tag (tested by `scripts/release-notes.test.mjs`).
+- `scripts/release-notes.mjs` — builds the GitHub release body from the `CHANGELOG.md` section plus the PRs and contributors since the previous tag (tested by `scripts/release-notes.test.mjs`). `version.mjs check vX.Y.Z-rc.N` accepts files at `X.Y.Z`, so a release candidate needs no version commit (`scripts/version.test.mjs`).
 - `.github/workflows/ci.yml` runs fmt, clippy, tests and the frontend build on every PR and push to `main`; `release.yml` runs on a `v*` tag. Actions are pinned to commit SHAs and kept current by Dependabot.
 - User-facing changes get a line under `[Unreleased]` in `CHANGELOG.md`; a release needs a `### Highlights` list. See `CONTRIBUTING.md`.
 
