@@ -61,6 +61,7 @@ Raw 1s samples → buffer averaged every 1m → `metrics_1m` → aggregated to `
 
 ### Key Design Decisions
 - Sampling: the collector looks every 1 s while a dashboard is connected (`tx.receiver_count() > 1`; the worker is always one receiver) and every 10 s otherwise. A new SSE connection pokes it (`AppState.wake`). Network and disk values are per-second rates (counter delta / elapsed), and the worker weights samples by the time they cover.
+- The process list is rescanned every 3 s (`PROCESS_SCAN_EVERY`) and the cached list is resent each tick; it is the costliest part of a sample (about 150 processes took roughly 30 ms of CPU per scan on the VPS).
 - Never keep a spare receiver of the metrics channel (`let (tx, _rx)` would): it counts as a viewer and pins buffered samples in memory.
 - `main()` pins glibc's mmap threshold (`libc::mallopt`, Linux/glibc only) so the 9 MiB Argon2 buffer is returned after each login.
 - Rust edition 2024

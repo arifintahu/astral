@@ -6,7 +6,8 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 
 ### Changed
 
-- **Far lower CPU use:** the collector no longer rescans every process every second, and samples every 10 seconds while no dashboard is open (every second while one is). Measured on a 4-vCPU VPS against 1.1.1: idle 5.88% to 0.03% of one core, idle with the process list on 10.87% to 0.23%, one dashboard open with the process list on 12.80% to 3.77%. A dashboard that connects still gets its first update within about a second.
+- **Far lower CPU use:** the collector no longer rescans every process every second, and samples every 10 seconds while no dashboard is open (every second while one is). Measured on a 4-vCPU VPS against 1.1.1: idle 5.88% to 0.03% of one core, idle with the process list on 10.87% to 0.27%, one dashboard open with the process list on 12.80% to 2.27%. A dashboard that connects still gets its first update within about a second.
+- **The process list is rescanned every 3 seconds** instead of every second; the last list is resent in between, so the stream is unchanged.
 - **Fewer threads and connections:** two async workers and at most two SQLite connections, so 5 threads instead of 7 to 9.
 - **Network and disk rates are per second:** they are computed from the time since the previous sample, so the sample interval no longer changes what the dashboard shows. History averages are weighted by the time each sample covers.
 - **Keep-alive comments** on the live stream are sent every 15 seconds instead of every second.

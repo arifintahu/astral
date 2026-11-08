@@ -43,16 +43,17 @@ Astral is meant to disappear on a small server, so these numbers come from a rea
 | Scenario | CPU | Memory (RSS) |
 | :--- | :---: | :---: |
 | Idle, no browser open | 0.03% | 7.2 MB |
-| Idle, process list on | 0.23% | 7.5 MB |
-| One signed-in dashboard open, process list on | 3.77% | 7.7 MB |
+| Idle, process list on | 0.27% | 7.6 MB |
+| One signed-in dashboard open, process list on | 2.27% | 7.7 MB |
 
-- **Spread across the three runs:** 0.03% to 0.08% idle, 0.22% to 0.28% with the process list on, and 3.7% to 4.5% with a dashboard open.
+- **Spread across the three runs:** 0.03% to 0.08% idle, 0.15% to 0.48% idle with the process list on, and 2.2% to 2.7% with a dashboard open. With a dashboard open and the process list off (the default), CPU is about 0.4%.
 - **Threads:** 5.
-- **Peak memory** (`VmHWM`): 13.9 MB at startup, from the one-time 9 MiB Argon2 password hash. A signed-in dashboard peaks at 15.5 MB.
+- **Peak memory** (`VmHWM`): 13.9 MB at startup, from the one-time 9 MiB Argon2 password hash. A signed-in dashboard peaks at 15.7 MB.
+- **What the 7 MB is:** about 1 MB of heap. The rest is the program's own code and the shared C library, clean pages that the kernel can drop under memory pressure.
 - **Binary:** 7.0 MB. **Time to ready:** about 0.25 to 0.3 s, almost all of it that startup hash.
 - **Bandwidth:** about 1.7 KB/s for each open dashboard.
 
-When nobody has the dashboard open, Astral samples every 10 seconds instead of every second, and history and alerts use time-weighted averages so they stay accurate. A dashboard that connects gets its first update within about a second. `./benchmark.sh` reproduces the idle row on your own machine.
+When nobody has the dashboard open, Astral samples every 10 seconds instead of every second, and history and alerts use time-weighted averages so they stay accurate. The process list is rescanned every 3 seconds, because reading every process is the most expensive thing Astral does. A dashboard that connects gets its first update within about a second. `./benchmark.sh` reproduces the idle row on your own machine.
 
 ## Install
 
