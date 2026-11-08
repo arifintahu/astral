@@ -416,11 +416,13 @@ button:focus-visible {
   to   { opacity: 1; transform: none; }
 }
 @keyframes trace {
-  from { stroke-dashoffset: 160; }
+  /* Travel = one dash period (180 + 1000), so the loop point is seamless. The dash starts
+     and ends fully off the path (pathLength 1000); the gap keeps a second dash off it too. */
+  from { stroke-dashoffset: 180; }
   to   { stroke-dashoffset: -1000; }
 }
 .anim-pop { animation: pop 0.25s cubic-bezier(0.2, 0.7, 0.2, 1) both; }
-.trace    { stroke-dasharray: 160 840; animation: trace 5s linear infinite; }
+.trace    { stroke-dasharray: 160 1020; animation: trace 5s linear infinite; }
 
 @media (prefers-reduced-motion: reduce) {
   .anim-pop, .trace, .anim-drawer { animation: none; }
