@@ -57,3 +57,33 @@ export interface DynamicConfig {
     retention_days: number;
     slack_webhook: string | null;
 }
+
+/* ── UI-only shapes (not serialised by the backend) ───────────────── */
+
+/** Which metric the hero chart is showing; the four tiles are its tabs. */
+export type MetricKey = 'cpu' | 'mem' | 'net' | 'disk';
+
+/** 'live' is the client-side 60-sample buffer; the rest map to /api/history?window= */
+export type WindowKey = 'live' | '6h' | '24h' | '7d' | 'all';
+
+/** Rolling buffers fed from the SSE stream, one sample per refresh. */
+export interface LiveSeries {
+    cpu: number[]; // %
+    mem: number[]; // % of total_memory
+    rx: number[];  // bytes/s
+    tx: number[];  // bytes/s
+    rd: number[];  // bytes/s
+    wr: number[];  // bytes/s
+}
+
+export interface TileData {
+    id: MetricKey;
+    label: string;
+    meta: string;
+    value: string;
+    unit: string;
+    sub: string;
+    pct: number;
+    zones: boolean;
+    meterColor?: string;
+}

@@ -5,4 +5,5 @@ wait_for_port.py
 astral.db*
 .env
 .claude/settings.local.json
+.claude/launch.json
 redesign/

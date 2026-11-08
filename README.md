@@ -1,7 +1,7 @@
 # Astral
 
 <p align="center">
-  <img src="public/icon.svg" alt="Astral icon" width="128" height="128">
+  <img src="web/public/icon-192.svg" alt="Astral icon" width="128" height="128">
 </p>
 <p align="center">
   <a href="https://github.com/arifintahu/astral/stargazers"><img src="https://img.shields.io/github/stars/arifintahu/astral" alt="GitHub stars"></a>
@@ -17,7 +17,8 @@ Astral provides a modern, single-page web UI that displays real-time system heal
 ## Features
 
 -   **Real-time Monitoring:** Live updates (1-second intervals) for CPU, Memory, Network, and Disk usage via Server-Sent Events (SSE).
--   **Historical Data:** Interactive charts for viewing trends over 6 hours, 24 hours, or 7 days, backed by an embedded SQLite database.
+-   **At-a-glance Status:** A one-line headline ("All systems nominal." or "CPU is running hot.") that follows the CPU and memory alert thresholds you configure, above four metric tiles (CPU, Memory, Network, Disk) that also switch the main chart.
+-   **Historical Data:** An interactive chart that starts on a live 60-second stream and switches to 6 hours, 24 hours, 7 days, or all retained history, backed by an embedded SQLite database.
 -   **Single Binary Deployment:** The Svelte frontend is embedded directly into the Rust binary. No external runtime dependencies (Node.js, Python, etc.) required on the host.
 -   **Secure by Default:** HMAC-SHA256 session tokens with per-login nonces, `HttpOnly; SameSite=Strict` cookies, Argon2 password hashing, login rate limiting, server-side session revocation, and a full set of security headers (CSP, HSTS, X-Frame-Options).
 -   **Alerting:** Configurable webhook alerts (HTTPS only) for high CPU or memory usage (sustained 5 minutes), with a 15-minute per-kind cooldown to prevent alert floods.
