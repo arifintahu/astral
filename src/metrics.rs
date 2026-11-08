@@ -1,6 +1,8 @@
 use serde::Serialize;
+use std::time::Instant;
 use sysinfo::{
-    CpuRefreshKind, Disks, MemoryRefreshKind, Networks, ProcessesToUpdate, RefreshKind, System,
+    CpuRefreshKind, Disks, MemoryRefreshKind, Networks, ProcessRefreshKind, ProcessesToUpdate,
+    RefreshKind, System,
 };
 use tokio::sync::broadcast;
 use tokio::time::{Duration, interval};
@@ -44,15 +46,45 @@ pub struct ProcessInfo {
     pub memory: u64,
 }
 
+/// How many processes the live feed carries.
+const TOP_PROCESSES: usize = 15;
+
 pub struct MetricsCollector {
     system: System,
     networks: Networks,
     disks: Disks,
+    // These never change while Astral runs, so read them once instead of on every sample.
+    hostname: String,
+    os_name: String,
+    os_version: String,
+    last_collect: Instant,
+}
+
+/// The `n` items with the highest `key`, best first. Selects before sorting, so only `n` items
+/// are ever sorted, however many there are.
+fn top_by<T>(mut items: Vec<T>, n: usize, key: impl Fn(&T) -> f32) -> Vec<T> {
+    let desc = |a: &T, b: &T| {
+        key(b)
+            .partial_cmp(&key(a))
+            .unwrap_or(std::cmp::Ordering::Equal)
+    };
+    if items.len() > n {
+        items.select_nth_unstable_by(n, desc);
+        items.truncate(n);
+    }
+    items.sort_by(desc);
+    items
+}
+
+/// A counter delta over `secs` seconds as a per-second rate. Samples are 1 s apart while someone
+/// is watching and much further apart when not, and the dashboard always shows bytes per second.
+fn per_second(delta: u64, secs: f64) -> u64 {
+    (delta as f64 / secs.max(0.001)).round() as u64
 }
 
 impl MetricsCollector {
     pub fn new() -> Self {
-        let mut system = System::new_with_specifics(
+        let system = System::new_with_specifics(
             RefreshKind::nothing()
                 .with_cpu(CpuRefreshKind::everything())
                 .with_memory(MemoryRefreshKind::everything()),
@@ -60,17 +92,25 @@ impl MetricsCollector {
         let networks = Networks::new_with_refreshed_list();
         let disks = Disks::new_with_refreshed_list();
 
-        system.refresh_all();
-
         Self {
             system,
             networks,
             disks,
+            hostname: System::host_name().unwrap_or_default(),
+            os_name: System::name().unwrap_or_default(),
+            os_version: System::os_version().unwrap_or_default(),
+            last_collect: Instant::now(),
         }
     }
 
     pub fn collect(&mut self, enable_process_list: bool) -> SystemMetrics {
-        self.system.refresh_all();
+        let now = Instant::now();
+        let secs = now.duration_since(self.last_collect).as_secs_f64();
+        self.last_collect = now;
+
+        // Not refresh_all(): that also walks every process, which is only needed for the list.
+        self.system.refresh_cpu_usage();
+        self.system.refresh_memory();
         self.networks.refresh(true);
         self.disks.refresh(true);
 
@@ -95,40 +135,22 @@ impl MetricsCollector {
                     mount_point: disk.mount_point().to_string_lossy().to_string(),
                     total_space: disk.total_space(),
                     available_space: disk.available_space(),
-                    read_bytes: usage.read_bytes,
-                    written_bytes: usage.written_bytes,
+                    read_bytes: per_second(usage.read_bytes, secs),
+                    written_bytes: per_second(usage.written_bytes, secs),
                 }
             })
             .collect();
 
-        let procs = if enable_process_list {
-            self.system.refresh_processes(ProcessesToUpdate::All, true);
-            let mut p: Vec<ProcessInfo> = self
-                .system
-                .processes()
-                .iter()
-                .map(|(pid, proc_)| ProcessInfo {
-                    pid: pid.as_u32(),
-                    name: proc_.name().to_string_lossy().to_string(),
-                    cpu_usage: proc_.cpu_usage(),
-                    memory: proc_.memory(),
-                })
-                .collect();
-            p.sort_by(|a, b| {
-                b.cpu_usage
-                    .partial_cmp(&a.cpu_usage)
-                    .unwrap_or(std::cmp::Ordering::Equal)
-            });
-            p.truncate(15);
-            p
+        let processes = if enable_process_list {
+            self.top_processes()
         } else {
             vec![]
         };
 
         SystemMetrics {
-            hostname: System::host_name().unwrap_or_default(),
-            os_name: System::name().unwrap_or_default(),
-            os_version: System::os_version().unwrap_or_default(),
+            hostname: self.hostname.clone(),
+            os_name: self.os_name.clone(),
+            os_version: self.os_version.clone(),
             uptime: System::uptime(),
             cpu_usage,
             cpu_cores,
@@ -137,11 +159,34 @@ impl MetricsCollector {
             used_memory: self.system.used_memory(),
             total_swap: self.system.total_swap(),
             used_swap: self.system.used_swap(),
-            network_tx,
-            network_rx,
+            network_tx: per_second(network_tx, secs),
+            network_rx: per_second(network_rx, secs),
             disks,
-            processes: procs,
+            processes,
         }
+    }
+
+    fn top_processes(&mut self) -> Vec<ProcessInfo> {
+        self.system.refresh_processes_specifics(
+            ProcessesToUpdate::All,
+            true,
+            ProcessRefreshKind::nothing().with_cpu().with_memory(),
+        );
+        let busiest = top_by(
+            self.system.processes().iter().collect(),
+            TOP_PROCESSES,
+            |(_, p)| p.cpu_usage(),
+        );
+        // Names are copied only for the few that are sent.
+        busiest
+            .into_iter()
+            .map(|(pid, p)| ProcessInfo {
+                pid: pid.as_u32(),
+                name: p.name().to_string_lossy().to_string(),
+                cpu_usage: p.cpu_usage(),
+                memory: p.memory(),
+            })
+            .collect()
     }
 }
 
@@ -156,3 +201,7 @@ pub async fn run_metrics_collector(tx: broadcast::Sender<SystemMetrics>, config:
         let _ = tx.send(metrics);
     }
 }
+
+#[cfg(test)]
+#[path = "metrics_test.rs"]
+mod tests;
