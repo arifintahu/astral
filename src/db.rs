@@ -4,7 +4,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 const VALID_TABLES: &[&str] = &["metrics_1m", "metrics_5m", "metrics_15m", "metrics_1h"];
 
-fn validate_table<'a>(table: &'a str) -> Result<&'a str> {
+fn validate_table(table: &str) -> Result<&str> {
     if VALID_TABLES.contains(&table) {
         Ok(table)
     } else {
@@ -27,6 +27,16 @@ pub struct MetricPoint {
     pub disk_read_rate: i64,
     pub disk_write_rate: i64,
 }
+
+/// cpu, memory, network tx / rx, disk read / write; each NULL when the window has no rows.
+type AverageRow = (
+    Option<f64>,
+    Option<i64>,
+    Option<i64>,
+    Option<i64>,
+    Option<i64>,
+    Option<i64>,
+);
 
 impl Db {
     pub async fn new(database_url: &str) -> Result<Self> {
@@ -136,14 +146,7 @@ impl Db {
             table
         );
 
-        let row: (
-            Option<f64>,
-            Option<i64>,
-            Option<i64>,
-            Option<i64>,
-            Option<i64>,
-            Option<i64>,
-        ) = sqlx::query_as(&query)
+        let row: AverageRow = sqlx::query_as(&query)
             .bind(start_ts)
             .fetch_one(&self.pool)
             .await?;

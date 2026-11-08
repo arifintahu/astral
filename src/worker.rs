@@ -197,9 +197,9 @@ impl Worker {
             0.0
         };
 
-        let cpu_on_cooldown = self.last_cpu_alert_at.map_or(false, |t| {
-            now_inst.duration_since(t).as_secs() < ALERT_COOLDOWN_SECS
-        });
+        let cpu_on_cooldown = self
+            .last_cpu_alert_at
+            .is_some_and(|t| now_inst.duration_since(t).as_secs() < ALERT_COOLDOWN_SECS);
 
         if avg_cpu > alert_cpu_threshold as f64 && !cpu_on_cooldown {
             let alert = AlertEvent {
@@ -217,9 +217,9 @@ impl Worker {
             self.last_cpu_alert_at = Some(now_inst);
         }
 
-        let ram_on_cooldown = self.last_ram_alert_at.map_or(false, |t| {
-            now_inst.duration_since(t).as_secs() < ALERT_COOLDOWN_SECS
-        });
+        let ram_on_cooldown = self
+            .last_ram_alert_at
+            .is_some_and(|t| now_inst.duration_since(t).as_secs() < ALERT_COOLDOWN_SECS);
 
         if avg_mem > threshold_mem_bytes as f64 && !ram_on_cooldown {
             let alert = AlertEvent {
@@ -254,22 +254,22 @@ impl Worker {
 
         // Slack Block Kit webhook
         let slack_url = self.config.read().await.slack_webhook.clone();
-        if let Some(url) = slack_url {
-            if url.starts_with("https://") {
-                let payload = serde_json::json!({
-                    "blocks": [{
-                        "type": "section",
-                        "text": {
-                            "type": "mrkdwn",
-                            "text": format!(
-                                "🚨 *Astral Alert*\nCPU: *{:.1}%* | Memory: *{:.1}%*",
-                                avg_cpu, mem_percent
-                            )
-                        }
-                    }]
-                });
-                self.post_webhook(url, payload).await;
-            }
+        if let Some(url) = slack_url
+            && url.starts_with("https://")
+        {
+            let payload = serde_json::json!({
+                "blocks": [{
+                    "type": "section",
+                    "text": {
+                        "type": "mrkdwn",
+                        "text": format!(
+                            "🚨 *Astral Alert*\nCPU: *{:.1}%* | Memory: *{:.1}%*",
+                            avg_cpu, mem_percent
+                        )
+                    }
+                }]
+            });
+            self.post_webhook(url, payload).await;
         }
 
         Ok(())

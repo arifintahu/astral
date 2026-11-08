@@ -133,20 +133,22 @@ async fn post_settings_handler(
     if let Some(v) = body.enable_process_list {
         config.enable_process_list = v;
     }
-    if let Some(v) = body.alert_cpu {
-        if v > 0.0 && v <= 100.0 {
-            config.alert_cpu = v;
-        }
+    if let Some(v) = body.alert_cpu
+        && v > 0.0
+        && v <= 100.0
+    {
+        config.alert_cpu = v;
     }
-    if let Some(v) = body.alert_ram {
-        if v > 0.0 && v <= 100.0 {
-            config.alert_ram = v;
-        }
+    if let Some(v) = body.alert_ram
+        && v > 0.0
+        && v <= 100.0
+    {
+        config.alert_ram = v;
     }
-    if let Some(v) = body.retention_days {
-        if v >= 1 && v <= 365 {
-            config.retention_days = v;
-        }
+    if let Some(v) = body.retention_days
+        && (1..=365).contains(&v)
+    {
+        config.retention_days = v;
     }
     if let Some(v) = body.slack_webhook {
         config.slack_webhook = if v.trim().is_empty() { None } else { Some(v) };

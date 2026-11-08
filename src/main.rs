@@ -405,10 +405,10 @@ async fn handle_login(
 }
 
 async fn handle_logout(headers: axum::http::HeaderMap, config: AuthConfig) -> Response {
-    if let Some(token) = get_cookie_token(&headers) {
-        if let Some(sig) = token_sig(&token) {
-            config.revocation.lock().await.insert(sig);
-        }
+    if let Some(token) = get_cookie_token(&headers)
+        && let Some(sig) = token_sig(&token)
+    {
+        config.revocation.lock().await.insert(sig);
     }
     let clear_cookie =
         HeaderValue::from_static("astral_session=; HttpOnly; Path=/; SameSite=Strict; Max-Age=0");
@@ -416,17 +416,17 @@ async fn handle_logout(headers: axum::http::HeaderMap, config: AuthConfig) -> Re
 }
 
 async fn auth_middleware(req: Request<Body>, next: Next, config: AuthConfig) -> Response {
-    if let Some(token) = get_cookie_token(req.headers()) {
-        if verify_session_token(&config.secret, &config.username, &token) {
-            let sig = token_sig(&token).unwrap_or_default();
-            if !config.revocation.lock().await.contains(&sig) {
-                // Check bulk revocation: token timestamp must be after the last revoke_all_at
-                let parts: Vec<&str> = token.splitn(3, '.').collect();
-                let token_ts: u64 = parts.first().and_then(|s| s.parse().ok()).unwrap_or(0);
-                let revoke_ts = *config.revoke_all_at.lock().await;
-                if token_ts > revoke_ts {
-                    return next.run(req).await;
-                }
+    if let Some(token) = get_cookie_token(req.headers())
+        && verify_session_token(&config.secret, &config.username, &token)
+    {
+        let sig = token_sig(&token).unwrap_or_default();
+        if !config.revocation.lock().await.contains(&sig) {
+            // Check bulk revocation: token timestamp must be after the last revoke_all_at
+            let parts: Vec<&str> = token.splitn(3, '.').collect();
+            let token_ts: u64 = parts.first().and_then(|s| s.parse().ok()).unwrap_or(0);
+            let revoke_ts = *config.revoke_all_at.lock().await;
+            if token_ts > revoke_ts {
+                return next.run(req).await;
             }
         }
     }
@@ -445,15 +445,15 @@ async fn static_handler(
         )
             .into_response()
     } else {
-        if !path.contains('.') {
-            if let Some(content) = Assets::get("index.html") {
-                let mime = mime_guess::from_path("index.html").first_or_octet_stream();
-                return (
-                    [(axum::http::header::CONTENT_TYPE, mime.as_ref())],
-                    content.data,
-                )
-                    .into_response();
-            }
+        if !path.contains('.')
+            && let Some(content) = Assets::get("index.html")
+        {
+            let mime = mime_guess::from_path("index.html").first_or_octet_stream();
+            return (
+                [(axum::http::header::CONTENT_TYPE, mime.as_ref())],
+                content.data,
+            )
+                .into_response();
         }
         StatusCode::NOT_FOUND.into_response()
     }
