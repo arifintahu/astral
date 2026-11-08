@@ -112,10 +112,30 @@ impl LoginLimiter {
     }
 }
 
+/// Keeps the 9 MiB Argon2 buffer from staying in memory after a login.
+///
+/// glibc normally serves big allocations with mmap and returns them on free. But after one such
+/// block is freed it raises its mmap threshold to that size, so the next 9 MiB buffer comes from
+/// the heap and stays resident. The startup password hash frees one, so the first login would
+/// leave about 9 MB behind for good. Pinning the threshold turns that adaptation off.
+#[cfg(all(target_os = "linux", target_env = "gnu"))]
+fn pin_malloc_mmap_threshold() {
+    // SAFETY: mallopt only sets an allocator tunable, and nothing else is allocating yet that
+    // depends on the old value.
+    unsafe {
+        libc::mallopt(libc::M_MMAP_THRESHOLD, 128 * 1024);
+    }
+}
+
+#[cfg(not(all(target_os = "linux", target_env = "gnu")))]
+fn pin_malloc_mmap_threshold() {}
+
 // Two workers are plenty for one SSE stream per viewer and a few API calls. The default is one
 // thread per core, which on a big server means dozens of idle threads and their stacks.
 #[tokio::main(worker_threads = 2)]
 async fn main() -> anyhow::Result<()> {
+    // Before the startup password hash below, which is what would otherwise move the threshold.
+    pin_malloc_mmap_threshold();
     tracing_subscriber::fmt::init();
     let args = Args::parse();
 

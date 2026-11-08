@@ -98,6 +98,7 @@ dependencies = [
  "futures",
  "hex",
  "hmac",
+ "libc",
  "mime_guess",
  "reqwest",
  "rust-embed",
