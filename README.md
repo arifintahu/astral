@@ -1,16 +1,21 @@
-# Astral
+<h1 align="center">Astral</h1>
+
+<p align="center"><b>A lightweight server monitoring dashboard in a single binary.</b></p>
 
 <p align="center">
-  <img src="web/public/icon-192.svg" alt="Astral icon" width="128" height="128">
+  <img src="web/public/icon-192.svg" alt="Astral icon" width="96" height="96">
 </p>
+
 <p align="center">
-  <a href="https://github.com/arifintahu/astral/stargazers"><img src="https://img.shields.io/github/stars/arifintahu/astral" alt="GitHub stars"></a>
-  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License"></a>
+  <a href="https://github.com/arifintahu/astral/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/arifintahu/astral/ci.yml?branch=main&style=flat-square&label=ci" alt="CI status"></a>
+  <a href="https://github.com/arifintahu/astral/releases"><img src="https://img.shields.io/github/v/release/arifintahu/astral?style=flat-square&label=release" alt="Latest release"></a>
+  <a href="https://github.com/arifintahu/astral/stargazers"><img src="https://img.shields.io/github/stars/arifintahu/astral?style=flat-square" alt="GitHub stars"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-green?style=flat-square" alt="License: MIT"></a>
 </p>
 
 Astral is a pragmatic, ultra-lightweight server monitoring dashboard. It bridges the gap between basic CLI tools like `htop` and complex observability stacks like Prometheus/Grafana.
 
-Astral provides a modern, single-page web UI that displays real-time system health and historical trends, secured by default, with built-in webhook alerting—all packaged into a single, easily deployable binary.
+It serves a modern single-page web UI with real-time system health and historical trends, secured by default, with built-in webhook alerting. Everything is packaged into one binary: Rust on the server, Svelte in the browser, SQLite for history. No account, no telemetry.
 
 ![Astral App Screenshot](demo.jpeg)
 
@@ -22,7 +27,12 @@ Astral provides a modern, single-page web UI that displays real-time system heal
 -   **Single Binary Deployment:** The Svelte frontend is embedded directly into the Rust binary. No external runtime dependencies (Node.js, Python, etc.) required on the host.
 -   **Secure by Default:** HMAC-SHA256 session tokens with per-login nonces, `HttpOnly; SameSite=Strict` cookies, Argon2 password hashing, login rate limiting, server-side session revocation, and a full set of security headers (CSP, HSTS, X-Frame-Options).
 -   **Alerting:** Configurable webhook alerts (HTTPS only) for high CPU or memory usage (sustained 5 minutes), with a 15-minute per-kind cooldown to prevent alert floods.
+-   **Settings without a restart:** Alert thresholds, process monitoring, retention and the Slack webhook can be changed from the dashboard.
 -   **Lightweight:** Minimal resource footprint, designed for small to medium-sized VPS and servers.
+
+## Why Astral
+
+`htop` shows you the moment you are looking; Prometheus and Grafana answer every question but ask you to run and maintain several services. Astral keeps one job: show what your server is doing now and over the last few days, and tell you when it stays hot. One file to copy, one port to open behind your reverse proxy, and nothing to configure beyond a login.
 
 ## Benchmarks
 
@@ -34,27 +44,27 @@ Running `./benchmark.sh` on a standard development environment:
 | **Execution Time** | 1.53ms (Time to Ready) |
 | **Peak Memory (RSS)** | 13.48 MB (`VmHWM`, idle after 10s warmup; ~17 MB after a login + SSE stream) |
 
-## Installation
+## Install
 
 ### Download Binary
 
-Pre-built binaries for Linux (amd64), Windows (amd64), and macOS (Apple Silicon) are available on the [Releases](https://github.com/yourusername/astral/releases) page.
+Pre-built binaries for Linux (amd64), Windows (amd64), and macOS (Apple Silicon) are available on the [Releases](https://github.com/arifintahu/astral/releases) page.
 
 1.  Download the latest release for your platform.
 2.  Make the binary executable (Linux/macOS):
     ```bash
-    chmod +x astral-linux-amd64
+    chmod +x astral-<version>-linux-amd64
     ```
 3.  Run it:
     ```bash
-    ./astral-linux-amd64
+    ./astral-<version>-linux-amd64
     ```
 
 ### Docker Deployment
 
 For production environments, deploying via Docker ensures a consistent runtime and easy updates.
 
-The provided `docker-compose.yml` is configured to run Astral with host networking and PID access, allowing it to monitor the host system accurately.
+The provided `docker-compose.yml` runs Astral with `pid: host` and read-only `/proc` and `/sys` mounts so it can see the host system, and binds the port to `127.0.0.1`.
 
 1.  **Set credentials via environment variable:**
     ```bash
@@ -68,10 +78,10 @@ The provided `docker-compose.yml` is configured to run Astral with host networki
     ```
 
 3.  **Access the dashboard:**
-    Open `http://<your-server-ip>:8080` (behind a TLS-terminating reverse proxy in production — see [TLS](#tls) below).
+    Open `http://127.0.0.1:8080`. To reach it from other machines, put a TLS-terminating reverse proxy in front — see [TLS](#tls) below.
 
 **Important Notes:**
--   **Host Monitoring:** Astral requires `--network host` and `--pid host` (along with `/proc` and `/sys` mounts) to accurately monitor the host system's CPU, memory, and network usage from within a container. Without these, it will only monitor the container's isolated environment.
+-   **Host Monitoring:** Astral needs `pid: host` (or `--pid host`) along with the `/proc` and `/sys` mounts to monitor the host's CPU, memory and processes from within a container. For the host's network traffic, run the container with `network_mode: host` (see the comments in `docker-compose.yml`). Without these, it only monitors the container's isolated environment.
 -   **Data Persistence:** The SQLite database is stored in `/app/data` inside the container. Use a volume (e.g., `astral_data`) to persist historical data across restarts.
 -   **Credentials:** Pass `ASTRAL_AUTH=user:pass` as an environment variable rather than a CLI flag. This keeps the password out of `docker inspect` output and process lists.
 
@@ -134,7 +144,9 @@ If neither is provided, Astral generates random credentials and prints them once
 | :--- | :--- | :--- | :--- |
 | `--port <PORT>` | — | Port to listen on. | `8080` |
 | `--auth <USER:PASS>` | `ASTRAL_AUTH` | Login credentials. | auto-generated |
+| `--retention <DAYS>` | — | Days of history to keep. | `7` |
 | `--webhook <URL>` | — | HTTPS webhook URL for alerts. | `None` |
+| `--slack-webhook <URL>` | — | Slack incoming webhook URL for alerts. | `None` |
 | `--alert-cpu <%>` | — | CPU threshold for alerts (0–100). | `90` |
 | `--alert-ram <%>` | — | Memory threshold for alerts (0–100). | `90` |
 | `--enable-process-list` | — | Include top processes in the live feed. | off |
@@ -191,20 +203,41 @@ Without TLS, the session cookie and login credentials are transmitted in plainte
 
 ## Development
 
-To run the project in development mode:
+Prerequisites: [Rust](https://rustup.rs/) (stable), [Node.js](https://nodejs.org/) 20+ and npm.
 
-1.  **Start the Frontend (HMR):**
-    ```bash
-    cd web
-    npm run dev
-    ```
-    *Note: The Rust backend expects the frontend to be built in `web/dist`. For true hot-reloading dev experience, you might need to proxy requests or rebuild the frontend on changes.*
+```sh
+git clone https://github.com/arifintahu/astral
+cd astral
+cd web && npm ci && npm run build && cd ..   # the frontend is embedded into the binary
+cargo run -- --auth admin:secret --port 3000
+```
 
-2.  **Run the Backend:**
-    ```bash
-    cargo run
-    ```
+```sh
+cargo test                                 # Rust tests
+cargo fmt --check && cargo clippy --all-targets -- -D warnings
+cd web && npm run build                    # frontend build and type-check
+node scripts/version.mjs check             # one version across Cargo.toml and web/
+```
+
+The binary embeds `web/dist`, so rebuild the frontend before `cargo build`. `cd web && npm run dev` starts Vite with hot reload for UI work, but it has no `/api` proxy, so it cannot sign in. See [CONTRIBUTING.md](CONTRIBUTING.md) for code style, pull requests, versioning and releases.
+
+## Project structure
+
+```
+src/        Rust backend: server and auth (main.rs), SSE, history and settings API (api.rs),
+            metrics collector (metrics.rs), aggregation and alerts (worker.rs), SQLite (db.rs)
+web/        Svelte 5 frontend, built to web/dist and embedded into the binary
+scripts/    version.mjs (one version for the repo) and release-notes.mjs (release body)
+```
+
+[CLAUDE.md](CLAUDE.md) has the architecture and rules of thumb.
+
+## Docs and contributing
+
+[Contributing](CONTRIBUTING.md) · [Architecture](CLAUDE.md) · [Changelog](CHANGELOG.md) · [Security](SECURITY.md)
+
+Every release lists its pull requests and contributors in the [release notes](https://github.com/arifintahu/astral/releases).
 
 ## License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+[MIT](LICENSE).
