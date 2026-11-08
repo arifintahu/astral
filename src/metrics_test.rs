@@ -48,3 +48,30 @@ fn samples_every_second_only_while_a_dashboard_is_connected() {
     assert_eq!(sample_interval(2), WATCHED_EVERY);
     assert_eq!(sample_interval(5), WATCHED_EVERY);
 }
+
+#[test]
+fn process_scan_runs_the_first_time_and_then_only_when_due() {
+    let now = Instant::now();
+    let every = Duration::from_secs(3);
+    assert!(should_rescan(None, now, every));
+    assert!(!should_rescan(
+        Some(now),
+        now + Duration::from_secs(1),
+        every
+    ));
+    assert!(!should_rescan(
+        Some(now),
+        now + Duration::from_millis(2999),
+        every
+    ));
+    assert!(should_rescan(
+        Some(now),
+        now + Duration::from_secs(3),
+        every
+    ));
+    assert!(should_rescan(
+        Some(now),
+        now + Duration::from_secs(10),
+        every
+    ));
+}

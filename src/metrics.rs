@@ -49,6 +49,9 @@ pub struct ProcessInfo {
 
 /// How many processes the live feed carries.
 const TOP_PROCESSES: usize = 15;
+/// Walking /proc for every process is the most expensive thing Astral does, and a list of the
+/// busiest processes does not need a fresh reading every second. In between, the last list is resent.
+const PROCESS_SCAN_EVERY: Duration = Duration::from_secs(3);
 
 pub struct MetricsCollector {
     system: System,
@@ -59,6 +62,8 @@ pub struct MetricsCollector {
     os_name: String,
     os_version: String,
     last_collect: Instant,
+    processes: Vec<ProcessInfo>,
+    processes_scanned_at: Option<Instant>,
 }
 
 /// The `n` items with the highest `key`, best first. Selects before sorting, so only `n` items
@@ -75,6 +80,11 @@ fn top_by<T>(mut items: Vec<T>, n: usize, key: impl Fn(&T) -> f32) -> Vec<T> {
     }
     items.sort_by(desc);
     items
+}
+
+/// Whether the process list is due for a new scan: the first time, then once `every` has passed.
+fn should_rescan(last_scan: Option<Instant>, now: Instant, every: Duration) -> bool {
+    last_scan.is_none_or(|t| now.duration_since(t) >= every)
 }
 
 /// A counter delta over `secs` seconds as a per-second rate. Samples are 1 s apart while someone
@@ -101,6 +111,8 @@ impl MetricsCollector {
             os_name: System::name().unwrap_or_default(),
             os_version: System::os_version().unwrap_or_default(),
             last_collect: Instant::now(),
+            processes: Vec::new(),
+            processes_scanned_at: None,
         }
     }
 
@@ -143,9 +155,16 @@ impl MetricsCollector {
             .collect();
 
         let processes = if enable_process_list {
-            self.top_processes()
+            if should_rescan(self.processes_scanned_at, now, PROCESS_SCAN_EVERY) {
+                self.processes = self.top_processes();
+                self.processes_scanned_at = Some(now);
+            }
+            self.processes.clone()
         } else {
-            vec![]
+            // Turned off: drop the list so a later switch-on starts with a fresh scan.
+            self.processes = Vec::new();
+            self.processes_scanned_at = None;
+            Vec::new()
         };
 
         SystemMetrics {
