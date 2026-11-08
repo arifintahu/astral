@@ -1,7 +1,7 @@
 # Astral
 
 <p align="center">
-  <img src="public/icon.svg" alt="Astral icon" width="128" height="128">
+  <img src="web/public/icon-192.svg" alt="Astral icon" width="128" height="128">
 </p>
 <p align="center">
   <a href="https://github.com/arifintahu/astral/stargazers"><img src="https://img.shields.io/github/stars/arifintahu/astral" alt="GitHub stars"></a>
