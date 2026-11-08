@@ -1,4 +1,4 @@
-import type { SystemMetrics } from './types';
+import type { DiskInfo, SystemMetrics } from './types';
 
 /** Alert thresholds in percent, from DynamicConfig.alert_cpu / alert_ram (GET /api/settings). */
 export interface Thresholds {
@@ -20,8 +20,20 @@ export interface Status {
     color: string;
 }
 
+/** The disk the Disk tile and headline report on: the root mount, else the system drive, else the largest. */
+export function primaryDisk(disks: DiskInfo[]): DiskInfo | undefined {
+    return disks.find(d => d.mount_point === '/')
+        ?? disks.find(d => /^c:\\?$/i.test(d.mount_point))
+        ?? [...disks].sort((a, b) => b.total_space - a.total_space)[0];
+}
+
+/** sysinfo has no load average on Windows; the backend reports 0, 0, 0 there. */
+export function hasLoadAverage(m: SystemMetrics): boolean {
+    return !/^windows/i.test(m.os_name);
+}
+
 export function diskPercent(m: SystemMetrics): number {
-    const d = m.disks[0];
+    const d = primaryDisk(m.disks);
     if (!d || d.total_space <= 0) return 0;
     return ((d.total_space - d.available_space) / d.total_space) * 100;
 }
@@ -50,7 +62,9 @@ export function deriveStatus(m: SystemMetrics, t: Thresholds = DEFAULT_THRESHOLD
         return {
             level: 2,
             headline: worst.k === 'Disk' ? 'Disk is almost full.' : `${worst.k} is running hot.`,
-            sub: `${worst.k} is at ${v}% — above the ${crit}% alert threshold.` + (top ? ` The busiest process is ${top.name}.` : ''),
+            sub: worst.k === 'Disk'
+                ? `Disk is at ${v}% — free up space before it fills.`
+                : `${worst.k} is at ${v}% — above the ${crit}% alert threshold.` + (top ? ` The busiest process is ${top.name}.` : ''),
             color: 'var(--crit)',
         };
     }
@@ -58,7 +72,9 @@ export function deriveStatus(m: SystemMetrics, t: Thresholds = DEFAULT_THRESHOLD
         return {
             level: 1,
             headline: `${worst.k} is running warm.`,
-            sub: `${worst.k} is at ${v}% — worth keeping an eye on before it reaches the ${crit}% alert line.`,
+            sub: worst.k === 'Disk'
+                ? `Disk is at ${v}% — worth keeping an eye on.`
+                : `${worst.k} is at ${v}% — worth keeping an eye on before it reaches the ${crit}% alert line.`,
             color: 'var(--warm)',
         };
     }

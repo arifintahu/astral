@@ -2,7 +2,7 @@
   import { onMount } from 'svelte';
   import type { SystemMetrics, AlertEvent, DynamicConfig, LiveSeries, MetricKey, TileData } from './lib/types';
   import { fmtBytes, fmtRate, niceMaxRate, rateParts } from './lib/format';
-  import { DEFAULT_THRESHOLDS, diskPercent, memPercent, type Thresholds } from './lib/status';
+  import { DEFAULT_THRESHOLDS, diskPercent, hasLoadAverage, memPercent, primaryDisk, type Thresholds } from './lib/status';
   import TopBar             from './lib/components/TopBar.svelte';
   import StatusHero         from './lib/components/StatusHero.svelte';
   import MetricTile         from './lib/components/MetricTile.svelte';
@@ -148,13 +148,13 @@
   let tiles: TileData[] = $derived.by(() => {
     if (!metrics) return [];
     const m = metrics;
-    const d = m.disks[0];
+    const d = primaryDisk(m.disks);
     const diskUsed = d ? d.total_space - d.available_space : 0;
     const rxPeak = niceMaxRate(Math.max(...live.rx, 1));
     const rx = rateParts(m.network_rx);
     return [
       { id: 'cpu',  label: 'CPU',     meta: `${m.cpu_cores} cores`,
-        value: String(Math.round(m.cpu_usage)), unit: '%', sub: `Load ${m.cpu_load[0].toFixed(2)}`,
+        value: String(Math.round(m.cpu_usage)), unit: '%', sub: hasLoadAverage(m) ? `Load ${m.cpu_load[0].toFixed(2)}` : 'Load n/a',
         pct: m.cpu_usage, zones: true },
       { id: 'mem',  label: 'Memory',  meta: `Swap ${fmtBytes(m.used_swap)}`,
         value: String(Math.round(memPercent(m))), unit: '%', sub: `${fmtBytes(m.used_memory)} of ${fmtBytes(m.total_memory)}`,
@@ -227,6 +227,7 @@
         <div class="flex min-w-0 basis-[min(300px,100%)] flex-[1_1_auto] flex-col">
           <SystemDetails
             load={metrics.cpu_load}
+            showLoad={hasLoadAverage(metrics)}
             cores={metrics.cpu_cores}
             swapUsed={metrics.used_swap}
             swapTotal={metrics.total_swap}

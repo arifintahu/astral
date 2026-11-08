@@ -1,9 +1,11 @@
 <script lang="ts">
   import type { DiskInfo } from '../types';
   import { fmtBytes, zoneColor } from '../format';
+  import { primaryDisk } from '../status';
 
-  let { load, cores, swapUsed, swapTotal, disks }: {
+  let { load, showLoad, cores, swapUsed, swapTotal, disks }: {
     load: [number, number, number];
+    showLoad: boolean;
     cores: number;
     swapUsed: number;
     swapTotal: number;
@@ -22,7 +24,7 @@
 
   let mounts = $derived(
     [...disks]
-      .sort((a, b) => b.total_space - a.total_space)
+      .sort((a, b) => Number(b === primaryDisk(disks)) - Number(a === primaryDisk(disks)) || b.total_space - a.total_space)
       .slice(0, 3)
       .map(d => {
         const used = d.total_space - d.available_space;
@@ -40,6 +42,7 @@
 
 <div class="panel flex min-w-0 flex-1 flex-col gap-[26px] p-[clamp(16px,2.4vw,28px)]">
   <!-- Load average -->
+  {#if showLoad}
   <div class="flex flex-col gap-3.5">
     <span class="panel-title">Load average</span>
     <div class="flex gap-7">
@@ -52,9 +55,10 @@
     </div>
     <span class="font-mono text-[12px]" style="color:var(--ink-3)">across {cores} cores</span>
   </div>
+  {/if}
 
   <!-- Swap -->
-  <div class="flex flex-col gap-2.5 border-t pt-[22px]" style="border-color:var(--line)">
+  <div class="flex flex-col gap-2.5" class:border-t={showLoad} class:pt-[22px]={showLoad} style="border-color:var(--line)">
     <div class="flex items-baseline justify-between">
       <span class="panel-title">Swap</span>
       <span class="font-mono tnum text-[13px]" style="color:var(--ink-2)">{fmtBytes(swapUsed)} / {fmtBytes(swapTotal)}</span>

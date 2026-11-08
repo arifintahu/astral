@@ -7,6 +7,7 @@
   let error    = $state('');
   let loading  = $state(false);
 
+  const secure = location.protocol === 'https:';
   const LIT = 17;
   const TICKS = Array.from({ length: 28 }, (_, j) => j < LIT);
   const CURVE = 'M-20,560 C40,560 70,520 110,540 S170,610 215,560 S270,330 315,410 S375,620 430,540 S520,470 620,500';
@@ -84,7 +85,7 @@
       </form>
 
       <p class="font-mono m-0 text-center text-[12px]" style="color:var(--ink-3)">
-        Connection encrypted · session expires in 24h
+        {secure ? 'Connection encrypted' : 'Unencrypted connection (HTTP)'} · session expires in 24h
       </p>
     </div>
   </main>
