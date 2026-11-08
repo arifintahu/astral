@@ -59,7 +59,7 @@ When nobody has the dashboard open, Astral samples every 10 seconds instead of e
 
 ### Download Binary
 
-Pre-built binaries for Linux (amd64), Windows (amd64), and macOS (Apple Silicon) are available on the [Releases](https://github.com/arifintahu/astral/releases) page.
+Pre-built binaries for Linux (amd64, glibc 2.35 or newer, so Ubuntu 22.04 and Debian 12 work), Windows (amd64), and macOS (Apple Silicon) are available on the [Releases](https://github.com/arifintahu/astral/releases) page.
 
 1.  Download the latest release for your platform.
 2.  Make the binary executable (Linux/macOS):

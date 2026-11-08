@@ -56,7 +56,10 @@ jobs:
       max-parallel: 1
       matrix:
         include:
-          - os: ubuntu-latest
+          # An older runner on purpose: a binary links against the glibc of the machine that built
+          # it. Built on Ubuntu 24.04 it needs glibc 2.38 and will not start on Debian 12 (2.36) or
+          # Ubuntu 22.04 (2.35); built on 22.04 it runs on both and on anything newer.
+          - os: ubuntu-22.04
             target: x86_64-unknown-linux-gnu
             binary_name: astral
             os_suffix: linux-amd64
