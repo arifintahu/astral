@@ -40,3 +40,11 @@ fn per_second_scales_a_delta_by_the_elapsed_time() {
 fn per_second_never_divides_by_zero() {
     assert!(per_second(100, 0.0) > 0);
 }
+
+#[test]
+fn samples_every_second_only_while_a_dashboard_is_connected() {
+    // The worker is always subscribed; a dashboard is anything beyond it.
+    assert_eq!(sample_interval(1), IDLE_EVERY);
+    assert_eq!(sample_interval(2), WATCHED_EVERY);
+    assert_eq!(sample_interval(5), WATCHED_EVERY);
+}

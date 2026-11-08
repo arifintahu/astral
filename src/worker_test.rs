@@ -52,8 +52,12 @@ async fn test_process_1m_averages_buffer() {
         create_alert_history(),
     );
 
-    worker.buffer.push(make_metrics(20.0, 1000, 100, 200));
-    worker.buffer.push(make_metrics(40.0, 3000, 300, 400));
+    worker
+        .buffer
+        .push((1.0, make_metrics(20.0, 1000, 100, 200)));
+    worker
+        .buffer
+        .push((1.0, make_metrics(40.0, 3000, 300, 400)));
 
     worker.process_1m().await.unwrap();
 
@@ -145,8 +149,33 @@ async fn test_alert_not_triggered_below_threshold() {
     );
 
     for _ in 0..10 {
-        worker.buffer.push(make_metrics(10.0, 100_000, 50, 50));
+        worker
+            .buffer
+            .push((1.0, make_metrics(10.0, 100_000, 50, 50)));
     }
 
     worker.process_1m().await.unwrap();
+}
+
+#[tokio::test]
+async fn test_process_1m_weights_samples_by_the_time_they_cover() {
+    let db = Db::new("sqlite::memory:").await.unwrap();
+    let (_metrics_tx, metrics_rx) = broadcast::channel::<SystemMetrics>(100);
+    let mut worker = Worker::new(
+        db.clone(),
+        metrics_rx,
+        make_config(),
+        None,
+        create_alert_channel(),
+        create_alert_history(),
+    );
+
+    // One busy second, then nine quiet ones: the minute averaged 10%, not the 50% a plain mean gives.
+    worker.buffer.push((1.0, make_metrics(100.0, 1000, 0, 0)));
+    worker.buffer.push((9.0, make_metrics(0.0, 1000, 0, 0)));
+    worker.process_1m().await.unwrap();
+
+    let history = db.get_history("metrics_1m", 0).await.unwrap();
+    assert_eq!(history.len(), 1);
+    assert!((history[0].cpu_usage - 10.0).abs() < 1e-9);
 }

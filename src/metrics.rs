@@ -1,11 +1,12 @@
 use serde::Serialize;
+use std::sync::Arc;
 use std::time::Instant;
 use sysinfo::{
     CpuRefreshKind, Disks, MemoryRefreshKind, Networks, ProcessRefreshKind, ProcessesToUpdate,
     RefreshKind, System,
 };
-use tokio::sync::broadcast;
-use tokio::time::{Duration, interval};
+use tokio::sync::{Notify, broadcast};
+use tokio::time::{Duration, sleep};
 
 use crate::config::SharedConfig;
 
@@ -190,12 +191,43 @@ impl MetricsCollector {
     }
 }
 
-pub async fn run_metrics_collector(tx: broadcast::Sender<SystemMetrics>, config: SharedConfig) {
+/// Sample every second while someone is watching.
+const WATCHED_EVERY: Duration = Duration::from_secs(1);
+/// Nobody connected: the minute averages only need a few samples, so look far less often.
+const IDLE_EVERY: Duration = Duration::from_secs(10);
+/// Two samples closer than this would make the CPU reading and the rates noisy.
+const MIN_GAP: Duration = Duration::from_millis(500);
+
+/// `receivers` counts everything subscribed to the metrics channel. The worker is always one of
+/// them; anything beyond it is a dashboard.
+fn sample_interval(receivers: usize) -> Duration {
+    if receivers > 1 {
+        WATCHED_EVERY
+    } else {
+        IDLE_EVERY
+    }
+}
+
+/// `wake` is poked when a dashboard connects, so it gets its first sample at once instead of
+/// waiting out an idle interval.
+pub async fn run_metrics_collector(
+    tx: broadcast::Sender<SystemMetrics>,
+    config: SharedConfig,
+    wake: Arc<Notify>,
+) {
     let mut collector = MetricsCollector::new();
-    let mut tick = interval(Duration::from_secs(1));
+    let mut last = Instant::now();
 
     loop {
-        tick.tick().await;
+        tokio::select! {
+            _ = sleep(sample_interval(tx.receiver_count())) => {}
+            _ = wake.notified() => {}
+        }
+        if let Some(wait) = MIN_GAP.checked_sub(last.elapsed()) {
+            sleep(wait).await;
+        }
+        last = Instant::now();
+
         let enable = config.read().await.enable_process_list;
         let metrics = collector.collect(enable);
         let _ = tx.send(metrics);

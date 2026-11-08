@@ -17,7 +17,7 @@ use std::{
     sync::Arc,
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
-use tokio::sync::{Mutex, broadcast};
+use tokio::sync::{Mutex, Notify, broadcast};
 use tokio_stream::StreamExt;
 use tokio_stream::wrappers::BroadcastStream;
 
@@ -53,6 +53,8 @@ pub struct AppState {
     pub config: SharedConfig,
     pub alert_history: AlertHistory,
     pub revoke_all_at: Arc<Mutex<u64>>,
+    /// Tells the collector a dashboard just connected (see `run_metrics_collector`).
+    pub wake: Arc<Notify>,
 }
 
 pub fn app(state: AppState) -> Router {
@@ -77,6 +79,8 @@ async fn sse_handler(
     State(state): State<AppState>,
 ) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
     let rx = state.tx.subscribe();
+    // After subscribing, so this client is counted and receives the sample the poke triggers.
+    state.wake.notify_one();
     let stream = BroadcastStream::new(rx);
 
     Sse::new(stream.map(|msg| match msg {
@@ -86,7 +90,7 @@ async fn sse_handler(
         }
         Err(_) => Ok(Event::default().comment("missed message")),
     }))
-    .keep_alive(axum::response::sse::KeepAlive::new().interval(Duration::from_secs(1)))
+    .keep_alive(axum::response::sse::KeepAlive::new().interval(Duration::from_secs(15)))
 }
 
 async fn alerts_handler(

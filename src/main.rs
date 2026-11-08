@@ -184,12 +184,17 @@ async fn main() -> anyhow::Result<()> {
     };
     let shared_config: SharedConfig = Arc::new(tokio::sync::RwLock::new(dyn_config));
 
-    let (tx, _rx) = broadcast::channel::<SystemMetrics>(100);
+    // No spare receiver is kept: the collector counts subscribers to tell whether a dashboard is open,
+    // and a receiver that never reads would pin every message in the buffer. Consumers read each
+    // second, so a short buffer is enough.
+    let (tx, _) = broadcast::channel::<SystemMetrics>(16);
+    let wake = Arc::new(tokio::sync::Notify::new());
 
     let tx_clone = tx.clone();
     let config_for_metrics = shared_config.clone();
+    let wake_for_collector = wake.clone();
     tokio::spawn(async move {
-        metrics::run_metrics_collector(tx_clone, config_for_metrics).await;
+        metrics::run_metrics_collector(tx_clone, config_for_metrics, wake_for_collector).await;
     });
 
     let alert_tx = api::create_alert_channel();
@@ -214,6 +219,7 @@ async fn main() -> anyhow::Result<()> {
         config: shared_config,
         alert_history,
         revoke_all_at,
+        wake,
     };
     let auth_config_clone = auth_config.clone();
 
