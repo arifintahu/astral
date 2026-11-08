@@ -36,18 +36,20 @@ It serves a modern single-page web UI with real-time system health and historica
 
 ## Resource use
 
-Astral is meant to disappear on a small server, so these numbers come from a real one: a 4-vCPU AMD EPYC VPS with 7.9 GB RAM running Ubuntu 24.04, shared with other workloads. The Linux release binary was run next to the previous release (1.1.1) in three interleaved rounds of 60 seconds each, after a 20-second warm-up. Each cell is the median. CPU is the server's own CPU time as a share of one core, so other tenants do not count.
+Astral is meant to disappear on a small server, so these numbers come from a real one.
 
-| Scenario | CPU 1.1.1 | CPU now | Memory (RSS) 1.1.1 | Memory (RSS) now |
-| :--- | :---: | :---: | :---: | :---: |
-| Idle, no browser open | 5.88% | **0.03%** | 8.5 MB | **7.2 MB** |
-| Idle, process list on | 10.87% | **0.23%** | 9.3 MB | **7.5 MB** |
-| One signed-in dashboard open, process list on | 12.80% | **3.77%** | 18.1 MB | **7.7 MB** |
+**Test environment:** a VPS with 4 vCPUs (AMD EPYC) and 7.9 GB RAM, running Ubuntu 24.04 and shared with other workloads. The Linux (amd64) release binary was started with a fresh database, left to warm up for 20 seconds, then measured over 60 seconds. Each figure is the median of three runs. CPU is the server's own CPU time as a share of one core, so other tenants do not count.
 
-- **Spread:** CPU on 1.1.1 swung a lot on the shared VPS (idle with the process list on ranged from 4.4% to 13.2%; with a dashboard open from 4.5% to 12.9%). Now it ranges from 0.03% to 0.08% idle, 0.22% to 0.28% with the process list on, and 3.7% to 4.5% with a dashboard open.
-- **Threads:** 5, down from 7 to 9.
-- **Peak memory** (`VmHWM`) is 13.9 MB at startup, the one-time 9 MiB Argon2 password hash. A signed-in dashboard peaks at 15.5 MB, down from 18.1 MB.
-- **Binary:** 7.0 MB for Linux (amd64). **Time to ready:** about 0.25 to 0.3 s, almost all of it that startup hash.
+| Scenario | CPU | Memory (RSS) |
+| :--- | :---: | :---: |
+| Idle, no browser open | 0.03% | 7.2 MB |
+| Idle, process list on | 0.23% | 7.5 MB |
+| One signed-in dashboard open, process list on | 3.77% | 7.7 MB |
+
+- **Spread across the three runs:** 0.03% to 0.08% idle, 0.22% to 0.28% with the process list on, and 3.7% to 4.5% with a dashboard open.
+- **Threads:** 5.
+- **Peak memory** (`VmHWM`): 13.9 MB at startup, from the one-time 9 MiB Argon2 password hash. A signed-in dashboard peaks at 15.5 MB.
+- **Binary:** 7.0 MB. **Time to ready:** about 0.25 to 0.3 s, almost all of it that startup hash.
 - **Bandwidth:** about 1.7 KB/s for each open dashboard.
 
 When nobody has the dashboard open, Astral samples every 10 seconds instead of every second, and history and alerts use time-weighted averages so they stay accurate. A dashboard that connects gets its first update within about a second. `./benchmark.sh` reproduces the idle row on your own machine.
