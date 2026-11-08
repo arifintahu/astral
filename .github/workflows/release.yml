@@ -1,18 +1,59 @@
 name: Release
 
+# Push a tag like v1.2.0 after `node scripts/version.mjs set 1.2.0` and merging it (see CONTRIBUTING.md).
+# Builds binaries for Linux, Windows and macOS and publishes them with notes made from CHANGELOG.md
+# plus the pull requests and contributors since the previous release.
 on:
   push:
-    tags:
-      - 'v*'
+    tags: ["v*"]
 
 permissions:
   contents: write
+  # Release notes list the pull requests since the previous release.
+  pull-requests: read
 
 jobs:
-  build-and-release:
-    name: Build and Release
+  notes:
+    name: Release notes
+    runs-on: ubuntu-latest
+    outputs:
+      body: ${{ steps.notes.outputs.body }}
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Release notes need the tags to find the previous release.
+          fetch-depth: 0
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+
+      # A tag that disagrees with the files would publish binaries labelled with the wrong version.
+      - run: node scripts/version.mjs check ${{ github.ref_name }}
+
+      # The release body is this tag's CHANGELOG.md section plus the pull requests and contributors
+      # since the previous release; a stable tag without a Highlights section fails here.
+      - name: Release notes
+        id: notes
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: |
+          {
+            echo "body<<RELEASE_NOTES_EOF"
+            node scripts/release-notes.mjs "$GITHUB_REF_NAME"
+            echo "RELEASE_NOTES_EOF"
+          } >> "$GITHUB_OUTPUT"
+
+  build:
+    name: Build (${{ matrix.os_suffix }})
+    needs: notes
     runs-on: ${{ matrix.os }}
     strategy:
+      fail-fast: false
+      # Every job adds its binary to the same release; in parallel they could race to create it.
+      max-parallel: 1
       matrix:
         include:
           - os: ubuntu-latest
@@ -25,46 +66,47 @@ jobs:
             binary_name: astral.exe
             os_suffix: windows-amd64
             extension: .exe
-          - os: macos-14
+          - os: macos-latest
             target: aarch64-apple-darwin
             binary_name: astral
             os_suffix: macos-arm64
             extension: ""
 
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: '20'
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
 
-      - name: Install Frontend Dependencies
-        working-directory: ./web
-        run: npm ci
+      - name: Build frontend
+        working-directory: web
+        run: |
+          npm ci
+          npm run build
 
-      - name: Build Frontend
-        working-directory: ./web
-        run: npm run build
-
-      - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
+          toolchain: stable
           targets: ${{ matrix.target }}
 
-      - name: Build Backend
-        run: cargo build --release --target ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
 
-      - name: Rename Binary
+      - name: Build binary
+        run: cargo build --release --locked --target ${{ matrix.target }}
+
+      - name: Rename binary
         shell: bash
         run: |
           mv target/${{ matrix.target }}/release/${{ matrix.binary_name }} astral-${{ github.ref_name }}-${{ matrix.os_suffix }}${{ matrix.extension }}
 
-      - name: Upload Release Asset
-        uses: softprops/action-gh-release@v1
-        if: startsWith(github.ref, 'refs/tags/')
+      - name: Publish release
+        uses: softprops/action-gh-release@8a0cd651e5b2365bd640854a3fa5dfc70e4875f3 # v3.0.4
         with:
+          name: Astral ${{ github.ref_name }}
+          body: ${{ needs.notes.outputs.body }}
+          # A pre-release (v1.2.0-rc.1) is never GitHub's "latest".
+          prerelease: ${{ contains(github.ref_name, '-') }}
           files: astral-${{ github.ref_name }}-${{ matrix.os_suffix }}${{ matrix.extension }}
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
