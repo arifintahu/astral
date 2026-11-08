@@ -78,19 +78,36 @@ if [ $PY_EXIT_CODE -ne 0 ]; then
     exit 1
 fi
 
-# Warm up so the reading covers the collector, DB pool and worker running,
+# Warm up so the readings cover the collector, DB pool and worker running,
 # not just the moment the port opens.
 sleep "${WARMUP_SECS:-10}"
 
-# Peak RSS (VmHWM, kB) from /proc; falls back to current RSS where /proc is unavailable
+# Idle CPU: the server's own user+system time over a window with no browser connected.
+# Needs /proc (Linux); reported as a share of one core.
+CPU_PCT="N/A"
+if [ -r "/proc/$SERVER_PID/stat" ]; then
+    CPU_SECS="${CPU_SECS:-30}"
+    TICKS_PER_SEC=$(getconf CLK_TCK)
+    T0=$(awk '{print $14+$15}' "/proc/$SERVER_PID/stat")
+    sleep "$CPU_SECS"
+    T1=$(awk '{print $14+$15}' "/proc/$SERVER_PID/stat")
+    CPU_PCT=$(awk -v a="$T0" -v b="$T1" -v c="$TICKS_PER_SEC" -v s="$CPU_SECS" 'BEGIN{printf "%.2f", (b-a)/c/s*100}')
+fi
+
+# Peak RSS (VmHWM, kB) and current RSS (VmRSS) from /proc; falls back to ps where /proc is unavailable
 RSS_KB=$(grep VmHWM "/proc/$SERVER_PID/status" 2>/dev/null | tr -s ' ' | cut -d' ' -f2)
+NOW_KB=$(grep VmRSS "/proc/$SERVER_PID/status" 2>/dev/null | tr -s ' ' | cut -d' ' -f2)
+THREADS=$(grep Threads "/proc/$SERVER_PID/status" 2>/dev/null | tr -s '[:space:]' ' ' | cut -d' ' -f2)
 if [ -z "$RSS_KB" ]; then
     RSS_KB=$(ps -p $SERVER_PID -o rss --no-headers 2>/dev/null | tr -d ' ')
+    NOW_KB="$RSS_KB"
 fi
 if [ -n "$RSS_KB" ]; then
     RSS_MB=$(echo "$RSS_KB" | awk '{printf "%.2f", $1/1024}')
+    NOW_MB=$(echo "$NOW_KB" | awk '{printf "%.2f", $1/1024}')
 else
     RSS_MB="N/A"
+    NOW_MB="N/A"
 fi
 
 # Kill the server
@@ -108,5 +125,7 @@ echo "========================================"
 
 echo "Binary Size:       $BINARY_SIZE ($BINARY_SIZE_BYTES bytes)"
 echo "Execution Time:    ${STARTUP_TIME}ms (Time to Ready)"
-echo "Peak Memory (RSS): ${RSS_MB} MB"
+echo "Idle CPU:          ${CPU_PCT}% of one core (no browser connected)"
+echo "Memory (RSS):      ${NOW_MB} MB now, ${RSS_MB} MB peak (VmHWM)"
+echo "Threads:           ${THREADS:-N/A}"
 echo "========================================"
