@@ -44,10 +44,14 @@ MetricsCollector (1s interval) → broadcast::channel → SSE endpoint (/api/str
 Raw 1s samples → buffer averaged every 1m → `metrics_1m` → aggregated to `metrics_5m` → `metrics_15m` → `metrics_1h`. Each tier has its own retention/cleanup policy.
 
 ### Frontend (`web/src/`)
-- Svelte 5 with runes (`$state`), Tailwind CSS v4 (via `@tailwindcss/vite`), uPlot for charts
-- `App.svelte` — SSE connection to `/api/stream`, distributes metrics to card components
-- Components: `TopBar`, `CpuCard`, `MemoryCard`, `NetworkCard`, `DiskCard`, `HistoryChart`
-- Types mirror Rust structs in `web/src/lib/types.ts`
+- Svelte 5 with runes (`$state`), Tailwind CSS v4 (via `@tailwindcss/vite`). Charts are hand-drawn inline SVG in `HeroChart` — there is no chart library.
+- Design: lime "volt" accent on near-black. Theme tokens (`--accent`, `--bg-1`, `--warm`, `--crit`, …) and shared classes live in `app.css`.
+- `App.svelte` — SSE connection to `/api/stream`, keeps the 60-sample live buffer (`LiveSeries`), loads `alert_cpu` / `alert_ram` from `/api/settings` for the status headline, and lays out the dashboard
+- Dashboard: `StatusHero` (headline) → four `MetricTile`s (CPU, Memory, Network, Disk — they are also the tabs of the chart) → `HeroChart` (Live 60 s, or `/api/history` for 6H / 24H / 7D / All) → `ProcessList` + `SystemDetails` (load average, swap, mounts)
+- Other components: `TopBar`, `LedMeter`, `Login`, `Settings`, `AlertHistoryDrawer` (both use `Drawer`), `SignOutDialog`, `Toast`
+- `lib/status.ts` — headline logic (`deriveStatus`), `primaryDisk`, `hasLoadAverage` (Windows reports no load average). "Warm" starts 20 points below the alert line; disk has no backend alert and uses a fixed 90%.
+- `lib/format.ts` — byte/rate/percent formatters, chart scaling and smoothing helpers
+- Types mirror Rust structs in `web/src/lib/types.ts`; UI-only types (`MetricKey`, `WindowKey`, `LiveSeries`, `TileData`) sit at the bottom of that file
 
 ### Key Design Decisions
 - Rust edition 2024
