@@ -83,8 +83,8 @@ fn test_different_users_get_different_tokens() {
     let secret = "shared_secret";
     let t1 = create_session_token(secret, "alice").unwrap();
     let t2 = create_session_token(secret, "bob").unwrap();
-    let sig1 = t1.splitn(3, '.').nth(2).unwrap();
-    let sig2 = t2.splitn(3, '.').nth(2).unwrap();
+    let sig1 = t1.split('.').nth(2).unwrap();
+    let sig2 = t2.split('.').nth(2).unwrap();
     assert_ne!(sig1, sig2);
 }
 
@@ -94,8 +94,8 @@ fn test_concurrent_logins_produce_different_tokens() {
     let secret = "test_secret";
     let t1 = create_session_token(secret, "admin").unwrap();
     let t2 = create_session_token(secret, "admin").unwrap();
-    let nonce1 = t1.splitn(3, '.').nth(1).unwrap();
-    let nonce2 = t2.splitn(3, '.').nth(1).unwrap();
+    let nonce1 = t1.split('.').nth(1).unwrap();
+    let nonce2 = t2.split('.').nth(1).unwrap();
     assert_ne!(
         nonce1, nonce2,
         "Nonces must be unique across concurrent logins"

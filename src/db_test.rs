@@ -24,6 +24,8 @@ fn make_point(ts: i64, cpu: f64) -> MetricPoint {
         used_memory: 1024,
         network_tx: 100,
         network_rx: 200,
+        disk_read_rate: 0,
+        disk_write_rate: 0,
     }
 }
 
