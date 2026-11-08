@@ -4,23 +4,37 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-11-08
+
+### Highlights
+
+- **Close to zero when idle:** on a 4-vCPU VPS, Astral now uses 0.03% of one core with nobody connected (5.88% in 1.1.1) and 7.2 MB of memory (8.5 MB). It samples every 10 seconds while no dashboard is open and every second while one is. (#25)
+- **Less than half the memory once someone signs in:** 7.7 MB with a signed-in dashboard open, down from 18.1 MB, because a login no longer leaves the 9 MiB password-hash buffer behind. (#25)
+- **A new look:** a status headline ("All systems nominal." or "CPU is running hot.") above four metric tiles that are also the tabs of one hero chart, with a live 60-second view and 6H / 24H / 7D / All history. (#13)
+- **Tidier database:** the SQLite log file stays under 1 MB instead of resting at about 4 MB, and a failed retention cleanup is now logged. (#30)
+
+### Added
+
+- **`./benchmark.sh` reports idle CPU, current memory and thread count,** so the README numbers can be reproduced. (#25)
+
 ### Changed
 
-- **Far lower CPU use:** the collector no longer rescans every process every second, and samples every 10 seconds while no dashboard is open (every second while one is). Measured on a 4-vCPU VPS against 1.1.1: idle 5.88% to 0.03% of one core, idle with the process list on 10.87% to 0.27%, one dashboard open with the process list on 12.80% to 2.27%. A dashboard that connects still gets its first update within about a second.
-- **The process list is rescanned every 3 seconds** instead of every second; the last list is resent in between, so the stream is unchanged.
-- **Fewer threads and connections:** two async workers and at most two SQLite connections, so 5 threads instead of 7 to 9.
-- **Network and disk rates are per second:** they are computed from the time since the previous sample, so the sample interval no longer changes what the dashboard shows. History averages are weighted by the time each sample covers.
-- **Keep-alive comments** on the live stream are sent every 15 seconds instead of every second.
-- **New "volt" design:** a lime accent on near-black. A status headline ("All systems nominal." or "CPU is running hot.") sits above four metric tiles (CPU, Memory, Network, Disk) that are also the tabs of one hero chart. The chart starts on a live 60-second stream and switches to 6H / 24H / 7D / All. Below it are the top processes and a details panel with load average, swap and mounts. Login, Settings, alert history, alert toasts and a sign-out confirmation are restyled. (#13)
+- **Far lower CPU use:** the collector no longer rescans every process every second. Measured on the VPS against 1.1.1: idle 5.88% to 0.03% of one core, idle with the process list on 10.87% to 0.27%, one dashboard open with the process list on 12.80% to 2.27%. A dashboard that connects still gets its first update within about a second. (#25)
+- **The process list is rescanned every 3 seconds** instead of every second; the last list is resent in between, so the stream is unchanged. (#25)
+- **Fewer threads and connections:** two async workers and at most two SQLite connections, so 5 threads instead of 7 to 9. (#25)
+- **Network and disk rates are per second:** they are computed from the time since the previous sample, so the sample interval no longer changes what the dashboard shows. History averages are weighted by the time each sample covers. (#25)
+- **Keep-alive comments** on the live stream are sent every 15 seconds instead of every second. (#25)
+- **New "volt" design:** a lime accent on near-black. Below the hero chart are the top processes and a details panel with load average, swap and mounts. Login, Settings, alert history, alert toasts and a sign-out confirmation are restyled. (#13)
 - **The headline follows your alert thresholds:** "running warm" and "running hot" use the CPU and memory limits from Settings instead of a fixed 70% / 90%. (#13)
 - **Tab icon and install icon** match the new logo. (#13)
+- **Dependencies:** `hmac` 0.13 and `sha2` 0.11 (moved together), `tower-http` 0.7 and the Rust minor and patch updates (tokio, axum, reqwest, clap, serde and others); the web toolchain moves to Vite 8, plugin-svelte 7, Tailwind 4.3 and Svelte 5.57 (the production script is about 6 KB larger); the Docker build uses Rust 1.98 and Node 25. `sysinfo` stays on 0.36 on purpose: 0.40 measured slower with the process list on. (#15, #16, #17, #22, #26, #27, #28)
 
 ### Fixed
 
-- **The database log no longer sits at 4 MB:** the SQLite write-ahead log was left at about 4 MB (2.9 MB on a real server whose database was 90 KB). It now checkpoints sooner and is truncated to at most 1 MB; in a test of 3,000 writes it ended at 0.8 MB instead of 4.1 MB.
-- **Failed retention cleanups are logged:** a locked or full database used to fail the cleanup silently, so a table could keep growing unnoticed. The failure now shows up as a warning.
-- **One login held about 9 MB for good:** on Linux, glibc kept the 9 MiB password-hash buffer in memory after the first login. A signed-in dashboard now uses 7.7 MB instead of 18.1 MB.
-- **A spare receiver pinned old samples:** the live metrics channel kept an unused receiver that held 100 samples in memory and made the collector think someone was always watching. It is gone and the buffer is 16 slots.
+- **The database log no longer sits at 4 MB:** the SQLite write-ahead log was left at about 4 MB (2.9 MB on a real server whose database was 90 KB). It now checkpoints sooner and is truncated to at most 1 MB; in a test of 3,000 writes it ended at 0.8 MB instead of 4.1 MB. (#30)
+- **Failed retention cleanups are logged:** a locked or full database used to fail the cleanup silently, so a table could keep growing unnoticed. The failure now shows up as a warning. (#30)
+- **One login held about 9 MB for good:** on Linux, glibc kept the 9 MiB password-hash buffer in memory after the first login. A signed-in dashboard now uses 7.7 MB instead of 18.1 MB. (#25)
+- **A spare receiver pinned old samples:** the live metrics channel kept an unused receiver that held 100 samples in memory and made the collector think someone was always watching. It is gone and the buffer is 16 slots. (#25)
 - **Login animation loop:** the signal trace no longer snaps back at the end of each loop. (#13)
 - **Windows load average:** it is hidden on Windows, where the system reports no load average and the dashboard used to show 0.00. (#13)
 - **Disk tile and mounts agree:** the tile and headline use the root (or system) mount, and the mounts panel lists it first. The disk headline no longer mentions an alert threshold, because there is no disk alert. (#13)
@@ -95,7 +109,8 @@ First stable release.
 - A benchmark script and a size-optimised release build: about 7 MB, ready in about 1.5 ms. (#4)
 - The MIT license.
 
-[Unreleased]: https://github.com/arifintahu/astral/compare/v1.1.1...HEAD
+[Unreleased]: https://github.com/arifintahu/astral/compare/v1.2.0...HEAD
+[1.2.0]: https://github.com/arifintahu/astral/compare/v1.1.1...v1.2.0
 [1.1.1]: https://github.com/arifintahu/astral/compare/v1.1.0...v1.1.1
 [1.1.0]: https://github.com/arifintahu/astral/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/arifintahu/astral/releases/tag/v1.0.0
