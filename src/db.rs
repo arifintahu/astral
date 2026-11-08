@@ -1,10 +1,10 @@
 use anyhow::Result;
-use sqlx::{sqlite::SqlitePool, FromRow};
+use sqlx::{FromRow, sqlite::SqlitePool};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 const VALID_TABLES: &[&str] = &["metrics_1m", "metrics_5m", "metrics_15m", "metrics_1h"];
 
-fn validate_table<'a>(table: &'a str) -> Result<&'a str> {
+fn validate_table(table: &str) -> Result<&str> {
     if VALID_TABLES.contains(&table) {
         Ok(table)
     } else {
@@ -28,6 +28,16 @@ pub struct MetricPoint {
     pub disk_write_rate: i64,
 }
 
+/// cpu, memory, network tx / rx, disk read / write; each NULL when the window has no rows.
+type AverageRow = (
+    Option<f64>,
+    Option<i64>,
+    Option<i64>,
+    Option<i64>,
+    Option<i64>,
+    Option<i64>,
+);
+
 impl Db {
     pub async fn new(database_url: &str) -> Result<Self> {
         let pool = SqlitePool::connect(database_url).await?;
@@ -37,7 +47,9 @@ impl Db {
     }
 
     async fn init(&self) -> Result<()> {
-        sqlx::query("PRAGMA journal_mode=WAL").execute(&self.pool).await?;
+        sqlx::query("PRAGMA journal_mode=WAL")
+            .execute(&self.pool)
+            .await?;
 
         let tables = ["metrics_1m", "metrics_5m", "metrics_15m", "metrics_1h"];
         for table in tables {
@@ -134,11 +146,10 @@ impl Db {
             table
         );
 
-        let row: (Option<f64>, Option<i64>, Option<i64>, Option<i64>, Option<i64>, Option<i64>) =
-            sqlx::query_as(&query)
-                .bind(start_ts)
-                .fetch_one(&self.pool)
-                .await?;
+        let row: AverageRow = sqlx::query_as(&query)
+            .bind(start_ts)
+            .fetch_one(&self.pool)
+            .await?;
 
         if let (Some(cpu), Some(mem), Some(tx), Some(rx), Some(dr), Some(dw)) = row {
             Ok(Some(MetricPoint {

@@ -1,15 +1,15 @@
+use argon2::{
+    Algorithm, Argon2, Params, Version,
+    password_hash::{PasswordHash, PasswordHasher, PasswordVerifier, SaltString, rand_core::OsRng},
+};
 use axum::{
+    Json, Router,
     body::Body,
     extract::ConnectInfo,
-    http::{header, HeaderValue, Request, StatusCode},
+    http::{HeaderValue, Request, StatusCode, header},
     middleware::{self, Next},
     response::{IntoResponse, Response},
     routing::{get, post},
-    Json, Router,
-};
-use argon2::{
-    password_hash::{rand_core::OsRng, PasswordHash, PasswordHasher, PasswordVerifier, SaltString},
-    Algorithm, Argon2, Params, Version,
 };
 use clap::Parser;
 use hmac::{Hmac, Mac};
@@ -19,7 +19,7 @@ use std::collections::{HashMap, HashSet};
 use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
-use tokio::sync::{broadcast, Mutex};
+use tokio::sync::{Mutex, broadcast};
 
 mod api;
 mod config;
@@ -128,7 +128,10 @@ async fn main() -> anyhow::Result<()> {
         eprintln!("No auth provided — generated credentials (save these now):");
         eprintln!("  Username : {}", username);
         eprintln!("  Password : {}", password);
-        eprintln!("  Persist  : set ASTRAL_AUTH={}:<password> or use --auth", username);
+        eprintln!(
+            "  Persist  : set ASTRAL_AUTH={}:<password> or use --auth",
+            username
+        );
         (username, password)
     };
 
@@ -145,7 +148,13 @@ async fn main() -> anyhow::Result<()> {
     let secret = uuid::Uuid::new_v4().to_string();
     let revocation: RevocationSet = Arc::new(Mutex::new(HashSet::new()));
     let revoke_all_at: Arc<Mutex<u64>> = Arc::new(Mutex::new(0u64));
-    let auth_config = AuthConfig { username, password_hash, secret, revocation, revoke_all_at: revoke_all_at.clone() };
+    let auth_config = AuthConfig {
+        username,
+        password_hash,
+        secret,
+        revocation,
+        revoke_all_at: revoke_all_at.clone(),
+    };
     let limiter = LoginLimiter::new();
 
     let limiter_cleanup = limiter.clone();
@@ -218,11 +227,13 @@ async fn main() -> anyhow::Result<()> {
     let public_router = Router::new()
         .route(
             "/api/login",
-            post(move |ConnectInfo(addr): ConnectInfo<SocketAddr>, body: Json<LoginRequest>| {
-                let config = login_config.clone();
-                let limiter = login_limiter.clone();
-                async move { handle_login(body, config, limiter, addr).await }
-            }),
+            post(
+                move |ConnectInfo(addr): ConnectInfo<SocketAddr>, body: Json<LoginRequest>| {
+                    let config = login_config.clone();
+                    let limiter = login_limiter.clone();
+                    async move { handle_login(body, config, limiter, addr).await }
+                },
+            ),
         )
         .route("/", get(index_handler))
         .route("/{*file}", get(static_handler));
@@ -245,7 +256,10 @@ async fn main() -> anyhow::Result<()> {
         let h = resp.headers_mut();
         h.insert("X-Content-Type-Options", "nosniff".parse().unwrap());
         h.insert("X-Frame-Options", "DENY".parse().unwrap());
-        h.insert("Referrer-Policy", "strict-origin-when-cross-origin".parse().unwrap());
+        h.insert(
+            "Referrer-Policy",
+            "strict-origin-when-cross-origin".parse().unwrap(),
+        );
         h.insert(
             "Content-Security-Policy",
             "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; connect-src 'self'; img-src 'self' data:"
@@ -268,7 +282,11 @@ async fn main() -> anyhow::Result<()> {
     println!("Listening on {}", addr);
 
     let listener = tokio::net::TcpListener::bind(addr).await?;
-    axum::serve(listener, app.into_make_service_with_connect_info::<SocketAddr>()).await?;
+    axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<SocketAddr>(),
+    )
+    .await?;
 
     Ok(())
 }
@@ -375,7 +393,9 @@ async fn handle_login(
         (
             StatusCode::OK,
             [(header::SET_COOKIE, cookie_val)],
-            Json(LoginResponse { username: body.username }),
+            Json(LoginResponse {
+                username: body.username,
+            }),
         )
             .into_response()
     } else {
@@ -385,29 +405,28 @@ async fn handle_login(
 }
 
 async fn handle_logout(headers: axum::http::HeaderMap, config: AuthConfig) -> Response {
-    if let Some(token) = get_cookie_token(&headers) {
-        if let Some(sig) = token_sig(&token) {
-            config.revocation.lock().await.insert(sig);
-        }
+    if let Some(token) = get_cookie_token(&headers)
+        && let Some(sig) = token_sig(&token)
+    {
+        config.revocation.lock().await.insert(sig);
     }
-    let clear_cookie = HeaderValue::from_static(
-        "astral_session=; HttpOnly; Path=/; SameSite=Strict; Max-Age=0",
-    );
+    let clear_cookie =
+        HeaderValue::from_static("astral_session=; HttpOnly; Path=/; SameSite=Strict; Max-Age=0");
     (StatusCode::OK, [(header::SET_COOKIE, clear_cookie)]).into_response()
 }
 
 async fn auth_middleware(req: Request<Body>, next: Next, config: AuthConfig) -> Response {
-    if let Some(token) = get_cookie_token(req.headers()) {
-        if verify_session_token(&config.secret, &config.username, &token) {
-            let sig = token_sig(&token).unwrap_or_default();
-            if !config.revocation.lock().await.contains(&sig) {
-                // Check bulk revocation: token timestamp must be after the last revoke_all_at
-                let parts: Vec<&str> = token.splitn(3, '.').collect();
-                let token_ts: u64 = parts.first().and_then(|s| s.parse().ok()).unwrap_or(0);
-                let revoke_ts = *config.revoke_all_at.lock().await;
-                if token_ts > revoke_ts {
-                    return next.run(req).await;
-                }
+    if let Some(token) = get_cookie_token(req.headers())
+        && verify_session_token(&config.secret, &config.username, &token)
+    {
+        let sig = token_sig(&token).unwrap_or_default();
+        if !config.revocation.lock().await.contains(&sig) {
+            // Check bulk revocation: token timestamp must be after the last revoke_all_at
+            let parts: Vec<&str> = token.splitn(3, '.').collect();
+            let token_ts: u64 = parts.first().and_then(|s| s.parse().ok()).unwrap_or(0);
+            let revoke_ts = *config.revoke_all_at.lock().await;
+            if token_ts > revoke_ts {
+                return next.run(req).await;
             }
         }
     }
@@ -420,17 +439,21 @@ async fn static_handler(
     let path = path.trim_start_matches('/');
     if let Some(content) = Assets::get(path) {
         let mime = mime_guess::from_path(path).first_or_octet_stream();
-        ([(axum::http::header::CONTENT_TYPE, mime.as_ref())], content.data).into_response()
+        (
+            [(axum::http::header::CONTENT_TYPE, mime.as_ref())],
+            content.data,
+        )
+            .into_response()
     } else {
-        if !path.contains('.') {
-            if let Some(content) = Assets::get("index.html") {
-                let mime = mime_guess::from_path("index.html").first_or_octet_stream();
-                return (
-                    [(axum::http::header::CONTENT_TYPE, mime.as_ref())],
-                    content.data,
-                )
-                    .into_response();
-            }
+        if !path.contains('.')
+            && let Some(content) = Assets::get("index.html")
+        {
+            let mime = mime_guess::from_path("index.html").first_or_octet_stream();
+            return (
+                [(axum::http::header::CONTENT_TYPE, mime.as_ref())],
+                content.data,
+            )
+                .into_response();
         }
         StatusCode::NOT_FOUND.into_response()
     }

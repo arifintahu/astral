@@ -1,20 +1,25 @@
 use axum::{
+    Json, Router,
     body::Body,
     extract::{Query, State},
-    http::{header, HeaderMap, StatusCode},
+    http::{HeaderMap, StatusCode, header},
     response::{
-        sse::{Event, Sse},
         IntoResponse, Response,
+        sse::{Event, Sse},
     },
     routing::get,
-    Json, Router,
 };
 use futures::stream::Stream;
 use serde::{Deserialize, Serialize};
-use std::{collections::VecDeque, convert::Infallible, sync::Arc, time::{Duration, SystemTime, UNIX_EPOCH}};
-use tokio::sync::{broadcast, Mutex};
-use tokio_stream::wrappers::BroadcastStream;
+use std::{
+    collections::VecDeque,
+    convert::Infallible,
+    sync::Arc,
+    time::{Duration, SystemTime, UNIX_EPOCH},
+};
+use tokio::sync::{Mutex, broadcast};
 use tokio_stream::StreamExt;
+use tokio_stream::wrappers::BroadcastStream;
 
 use crate::config::SharedConfig;
 use crate::db::Db;
@@ -57,8 +62,14 @@ pub fn app(state: AppState) -> Router {
         .route("/api/history/export", get(export_handler))
         .route("/api/alerts", get(alerts_handler))
         .route("/api/alerts/history", get(alerts_history_handler))
-        .route("/api/settings", get(get_settings_handler).post(post_settings_handler))
-        .route("/api/sessions/revoke", axum::routing::post(revoke_sessions_handler))
+        .route(
+            "/api/settings",
+            get(get_settings_handler).post(post_settings_handler),
+        )
+        .route(
+            "/api/sessions/revoke",
+            axum::routing::post(revoke_sessions_handler),
+        )
         .with_state(state)
 }
 
@@ -122,20 +133,22 @@ async fn post_settings_handler(
     if let Some(v) = body.enable_process_list {
         config.enable_process_list = v;
     }
-    if let Some(v) = body.alert_cpu {
-        if v > 0.0 && v <= 100.0 {
-            config.alert_cpu = v;
-        }
+    if let Some(v) = body.alert_cpu
+        && v > 0.0
+        && v <= 100.0
+    {
+        config.alert_cpu = v;
     }
-    if let Some(v) = body.alert_ram {
-        if v > 0.0 && v <= 100.0 {
-            config.alert_ram = v;
-        }
+    if let Some(v) = body.alert_ram
+        && v > 0.0
+        && v <= 100.0
+    {
+        config.alert_ram = v;
     }
-    if let Some(v) = body.retention_days {
-        if v >= 1 && v <= 365 {
-            config.retention_days = v;
-        }
+    if let Some(v) = body.retention_days
+        && (1..=365).contains(&v)
+    {
+        config.retention_days = v;
     }
     if let Some(v) = body.slack_webhook {
         config.slack_webhook = if v.trim().is_empty() { None } else { Some(v) };
@@ -219,14 +232,10 @@ async fn export_handler(
                     point.disk_write_rate,
                 ));
             }
-            let disposition =
-                format!("attachment; filename=\"astral-history-{}.csv\"", window);
+            let disposition = format!("attachment; filename=\"astral-history-{}.csv\"", window);
             let mut headers = HeaderMap::new();
             headers.insert(header::CONTENT_TYPE, "text/csv".parse().unwrap());
-            headers.insert(
-                header::CONTENT_DISPOSITION,
-                disposition.parse().unwrap(),
-            );
+            headers.insert(header::CONTENT_DISPOSITION, disposition.parse().unwrap());
             Response::builder()
                 .status(StatusCode::OK)
                 .body(Body::from(csv))

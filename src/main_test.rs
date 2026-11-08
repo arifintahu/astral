@@ -1,7 +1,7 @@
 use super::*;
 use argon2::{
-    password_hash::{rand_core::OsRng, PasswordHash, PasswordHasher, PasswordVerifier, SaltString},
     Argon2,
+    password_hash::{PasswordHash, PasswordHasher, PasswordVerifier, SaltString, rand_core::OsRng},
 };
 use hmac::Mac;
 
@@ -12,8 +12,15 @@ fn test_token_format_is_timestamp_dot_nonce_dot_hmac() {
     let token = create_session_token("secret", "admin").unwrap();
     let parts: Vec<&str> = token.splitn(3, '.').collect();
     assert_eq!(parts.len(), 3, "Token should be timestamp.nonce.hmac");
-    assert!(parts[0].parse::<u64>().is_ok(), "First part should be a u64 timestamp");
-    assert_eq!(parts[1].len(), 32, "Nonce should be 16 bytes = 32 hex chars");
+    assert!(
+        parts[0].parse::<u64>().is_ok(),
+        "First part should be a u64 timestamp"
+    );
+    assert_eq!(
+        parts[1].len(),
+        32,
+        "Nonce should be 16 bytes = 32 hex chars"
+    );
     assert_eq!(parts[2].len(), 64, "HMAC-SHA256 hex should be 64 chars");
 }
 
@@ -76,8 +83,8 @@ fn test_different_users_get_different_tokens() {
     let secret = "shared_secret";
     let t1 = create_session_token(secret, "alice").unwrap();
     let t2 = create_session_token(secret, "bob").unwrap();
-    let sig1 = t1.splitn(3, '.').nth(2).unwrap();
-    let sig2 = t2.splitn(3, '.').nth(2).unwrap();
+    let sig1 = t1.split('.').nth(2).unwrap();
+    let sig2 = t2.split('.').nth(2).unwrap();
     assert_ne!(sig1, sig2);
 }
 
@@ -87,9 +94,12 @@ fn test_concurrent_logins_produce_different_tokens() {
     let secret = "test_secret";
     let t1 = create_session_token(secret, "admin").unwrap();
     let t2 = create_session_token(secret, "admin").unwrap();
-    let nonce1 = t1.splitn(3, '.').nth(1).unwrap();
-    let nonce2 = t2.splitn(3, '.').nth(1).unwrap();
-    assert_ne!(nonce1, nonce2, "Nonces must be unique across concurrent logins");
+    let nonce1 = t1.split('.').nth(1).unwrap();
+    let nonce2 = t2.split('.').nth(1).unwrap();
+    assert_ne!(
+        nonce1, nonce2,
+        "Nonces must be unique across concurrent logins"
+    );
 }
 
 // --- Rate Limiter Tests ---
@@ -110,7 +120,10 @@ async fn test_limiter_blocks_over_limit() {
     for _ in 0..MAX_LOGIN_ATTEMPTS {
         limiter.check_rate_limit(ip).await;
     }
-    assert!(!limiter.check_rate_limit(ip).await, "Should block after max attempts");
+    assert!(
+        !limiter.check_rate_limit(ip).await,
+        "Should block after max attempts"
+    );
 }
 
 #[tokio::test]
@@ -136,7 +149,11 @@ fn test_argon2_hash_and_verify() {
         .unwrap()
         .to_string();
     let parsed = PasswordHash::new(&hash).unwrap();
-    assert!(Argon2::default().verify_password(password.as_bytes(), &parsed).is_ok());
+    assert!(
+        Argon2::default()
+            .verify_password(password.as_bytes(), &parsed)
+            .is_ok()
+    );
 }
 
 #[test]
@@ -147,7 +164,11 @@ fn test_argon2_rejects_wrong_password() {
         .unwrap()
         .to_string();
     let parsed = PasswordHash::new(&hash).unwrap();
-    assert!(Argon2::default().verify_password(b"wrong", &parsed).is_err());
+    assert!(
+        Argon2::default()
+            .verify_password(b"wrong", &parsed)
+            .is_err()
+    );
 }
 
 #[test]

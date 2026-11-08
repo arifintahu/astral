@@ -1,0 +1,26 @@
+name: Feature request
+description: Suggest something Astral should do
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What are you trying to do, and what gets in the way today?
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: What you would like
+      description: A rough idea is fine. Say who it is for and how you would know it works.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Other ways you considered
+  - type: markdown
+    attributes:
+      value: |
+        Astral is a small, single-binary dashboard. Large changes are discussed in an issue first, see [CONTRIBUTING.md](https://github.com/arifintahu/astral/blob/main/CONTRIBUTING.md).

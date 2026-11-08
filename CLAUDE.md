@@ -53,6 +53,12 @@ Raw 1s samples → buffer averaged every 1m → `metrics_1m` → aggregated to `
 - `lib/format.ts` — byte/rate/percent formatters, chart scaling and smoothing helpers
 - Types mirror Rust structs in `web/src/lib/types.ts`; UI-only types (`MetricKey`, `WindowKey`, `LiveSeries`, `TileData`) sit at the bottom of that file
 
+### Repo, CI and releases
+- `scripts/version.mjs` — one version across `Cargo.toml`, `Cargo.lock`, `web/package.json` and `web/package-lock.json` (`set X.Y.Z` / `check`); bump only with this script.
+- `scripts/release-notes.mjs` — builds the GitHub release body from the `CHANGELOG.md` section plus the PRs and contributors since the previous tag (tested by `scripts/release-notes.test.mjs`).
+- `.github/workflows/ci.yml` runs fmt, clippy, tests and the frontend build on every PR and push to `main`; `release.yml` runs on a `v*` tag. Actions are pinned to commit SHAs and kept current by Dependabot.
+- User-facing changes get a line under `[Unreleased]` in `CHANGELOG.md`; a release needs a `### Highlights` list. See `CONTRIBUTING.md`.
+
 ### Key Design Decisions
 - Rust edition 2024
 - No ORM migrations — tables created programmatically in `db.rs::init()`
