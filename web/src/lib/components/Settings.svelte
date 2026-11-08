@@ -1,12 +1,14 @@
 <script lang="ts">
   import type { DynamicConfig } from '../types';
+  import Drawer from './Drawer.svelte';
 
-  let { open, onClose, refreshRate, onRefreshRateChange, onLogout }: {
+  let { open, onClose, refreshRate, onRefreshRateChange, onLogout, onConfigChange }: {
     open: boolean;
     onClose: () => void;
     refreshRate: number;
     onRefreshRateChange: (r: number) => void;
     onLogout: () => void;
+    onConfigChange: (c: DynamicConfig) => void;
   } = $props();
 
   let saving   = $state(false);
@@ -26,7 +28,7 @@
   async function loadConfig() {
     try {
       const r = await fetch('/api/settings');
-      if (r.ok) { config = await r.json(); webhookInput = config.slack_webhook ?? ''; }
+      if (r.ok) { config = await r.json(); webhookInput = config.slack_webhook ?? ''; onConfigChange(config); }
     } catch {/**/}
   }
 
@@ -53,147 +55,110 @@
   $effect(() => { if (open) loadConfig(); });
 </script>
 
-{#if open}
-  <!-- Backdrop -->
-  <div class="anim-backdrop" onclick={onClose} role="presentation"
-       style="position:fixed;inset:0;z-index:40;background:rgba(0,0,0,0.5);cursor:default"></div>
-
-  <!-- Drawer -->
-  <div class="anim-drawer nice-scroll" role="dialog" aria-label="Settings"
-       style="position:fixed;right:0;top:0;bottom:0;z-index:50;width:440px;max-width:100vw;
-              background:var(--bg-1);border-left:1px solid var(--line);
-              display:flex;flex-direction:column;overflow-y:auto">
-
-    <!-- Header -->
-    <div style="display:flex;align-items:center;justify-content:space-between;padding:20px 24px;border-bottom:1px solid var(--line);flex-shrink:0">
-      <span style="font-size:15px;font-weight:600;color:var(--ink)">Settings</span>
-      <button onclick={onClose} class="btn" aria-label="Close settings" style="width:28px;height:28px;padding:0;border-radius:6px">
-        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--ink-3)" stroke-width="2" stroke-linecap="round">
-          <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
-        </svg>
-      </button>
-    </div>
-
-    <!-- Body -->
-    <div style="flex:1;padding:24px;display:flex;flex-direction:column;gap:28px;overflow-y:auto" class="nice-scroll">
+<Drawer {open} {onClose} title="Settings" width={460}>
+  {#snippet children()}
+    <div class="flex flex-col px-6 pb-6 pt-2">
 
       <!-- General -->
-      <section>
-        <div class="eyebrow" style="margin-bottom:14px">General</div>
-        <div style="display:flex;flex-direction:column;gap:12px">
-          <!-- Refresh rate -->
-          <div>
-            <div style="font-size:12px;color:var(--ink-2);margin-bottom:8px">Refresh rate</div>
-            <div class="seg-control">
-              {#each RATES as r}
-                <button class="seg-btn {refreshRate === r ? 'active' : ''}"
-                        onclick={() => onRefreshRateChange(r)}>{r}s</button>
-              {/each}
-            </div>
-          </div>
-          <!-- Process monitoring toggle -->
-          <div class="surface-2" style="padding:10px 14px;display:flex;align-items:center;justify-content:space-between;cursor:pointer"
-               onclick={() => save({ enable_process_list: !config.enable_process_list })}
-               role="button" tabindex="0"
-               onkeydown={e => e.key === 'Enter' && save({ enable_process_list: !config.enable_process_list })}>
-            <span style="font-size:13px;color:var(--ink-2)">Process monitoring</span>
-            <div style="width:36px;height:20px;border-radius:10px;position:relative;flex-shrink:0;transition:background 0.2s;background:{config.enable_process_list ? 'var(--accent-soft)' : 'var(--bg-2)'};border:1px solid {config.enable_process_list ? 'var(--accent-line)' : 'var(--line)'}">
-              <div style="position:absolute;top:2px;width:14px;height:14px;border-radius:50%;transition:left 0.2s,background 0.2s;left:{config.enable_process_list ? '18px' : '2px'};background:{config.enable_process_list ? 'var(--accent)' : 'var(--ink-4)'}"></div>
-            </div>
+      <section class="flex flex-col gap-3.5 border-b pb-6 pt-5" style="border-color:var(--line)">
+        <span class="eyebrow">General</span>
+        <div class="flex flex-wrap items-center justify-between gap-3">
+          <span class="text-[14px]" style="color:var(--ink-2)">Refresh rate</span>
+          <div class="seg2" role="group" aria-label="Refresh rate">
+            {#each RATES as r}
+              <button type="button" aria-pressed={refreshRate === r} onclick={() => onRefreshRateChange(r)}><span>{r}s</span></button>
+            {/each}
           </div>
         </div>
+        <button type="button" role="switch" aria-checked={config.enable_process_list}
+                class="flex min-h-[60px] w-full cursor-pointer items-center justify-between gap-4 rounded-[14px] border px-4 py-2 text-left"
+                style="border-color:var(--line);background:var(--bg-2);color:var(--ink);font-family:inherit"
+                onclick={() => save({ enable_process_list: !config.enable_process_list })}>
+          <span class="flex flex-col gap-0.5">
+            <span class="text-[14px]">Process monitoring</span>
+            <span class="text-[12px]" style="color:var(--ink-3)">Lists the busiest processes on the dashboard</span>
+          </span>
+          <span class="switch"></span>
+        </button>
       </section>
 
       <!-- Alerts -->
-      <section>
-        <div class="eyebrow" style="margin-bottom:14px">Alerts</div>
-        <div style="display:flex;flex-direction:column;gap:16px">
-          <!-- CPU threshold -->
-          <div>
-            <div style="display:flex;justify-content:space-between;margin-bottom:6px">
-              <span style="font-size:12px;color:var(--ink-2)">CPU threshold</span>
-              <span class="tnum font-mono" style="font-size:12px;color:var(--accent)">{config.alert_cpu.toFixed(0)}%</span>
-            </div>
-            <input type="range" min="50" max="100" step="1" value={config.alert_cpu}
-                   oninput={e => config.alert_cpu = parseFloat((e.target as HTMLInputElement).value)}
-                   onchange={e => save({ alert_cpu: parseFloat((e.target as HTMLInputElement).value) })}
-                   style="width:100%;accent-color:var(--accent)" />
+      <section class="flex flex-col gap-3 border-b py-6" style="border-color:var(--line)">
+        <span class="eyebrow">Alerts</span>
+
+        <div class="flex flex-col">
+          <div class="flex items-baseline justify-between">
+            <label for="alert-cpu" class="text-[14px]" style="color:var(--ink-2)">CPU threshold</label>
+            <span class="font-mono tnum text-[13px]" style="color:var(--accent)">{config.alert_cpu.toFixed(0)}%</span>
           </div>
-          <!-- RAM threshold -->
-          <div>
-            <div style="display:flex;justify-content:space-between;margin-bottom:6px">
-              <span style="font-size:12px;color:var(--ink-2)">Memory threshold</span>
-              <span class="tnum font-mono" style="font-size:12px;color:var(--accent)">{config.alert_ram.toFixed(0)}%</span>
-            </div>
-            <input type="range" min="50" max="100" step="1" value={config.alert_ram}
-                   oninput={e => config.alert_ram = parseFloat((e.target as HTMLInputElement).value)}
-                   onchange={e => save({ alert_ram: parseFloat((e.target as HTMLInputElement).value) })}
-                   style="width:100%;accent-color:var(--accent)" />
+          <input id="alert-cpu" type="range" min="50" max="100" step="1" value={config.alert_cpu}
+                 class="m-0 h-11 w-full" style="accent-color:var(--accent)"
+                 oninput={e => config.alert_cpu = parseFloat((e.target as HTMLInputElement).value)}
+                 onchange={e => save({ alert_cpu: parseFloat((e.target as HTMLInputElement).value) })} />
+        </div>
+
+        <div class="flex flex-col">
+          <div class="flex items-baseline justify-between">
+            <label for="alert-ram" class="text-[14px]" style="color:var(--ink-2)">Memory threshold</label>
+            <span class="font-mono tnum text-[13px]" style="color:var(--accent)">{config.alert_ram.toFixed(0)}%</span>
           </div>
-          <!-- Slack webhook -->
-          <div>
-            <div style="font-size:12px;color:var(--ink-2);margin-bottom:6px">Slack webhook URL</div>
-            <div style="display:flex;gap:8px">
-              <input type="url" bind:value={webhookInput}
-                     placeholder="https://hooks.slack.com/…"
-                     class="font-mono focus-ring"
-                     style="flex:1;background:var(--bg-2);border:1px solid var(--line);border-radius:8px;padding:8px 10px;font-size:11px;color:var(--ink);outline:none;min-width:0" />
-              <button onclick={() => save({ slack_webhook: webhookInput || null })}
-                      disabled={saving} class="btn" style="flex-shrink:0">Save</button>
-            </div>
-            {#if config.slack_webhook}
-              <div style="font-size:10px;color:var(--ok);margin-top:4px">Webhook active</div>
-            {/if}
+          <input id="alert-ram" type="range" min="50" max="100" step="1" value={config.alert_ram}
+                 class="m-0 h-11 w-full" style="accent-color:var(--accent)"
+                 oninput={e => config.alert_ram = parseFloat((e.target as HTMLInputElement).value)}
+                 onchange={e => save({ alert_ram: parseFloat((e.target as HTMLInputElement).value) })} />
+        </div>
+
+        <div class="flex flex-col gap-2">
+          <label for="slack-hook" class="text-[14px]" style="color:var(--ink-2)">Slack webhook URL</label>
+          <div class="flex gap-2">
+            <input id="slack-hook" type="url" bind:value={webhookInput} placeholder="https://hooks.slack.com/…"
+                   class="field font-mono h-11 min-w-0 flex-1 px-3.5 text-[12px]" style="border-radius:12px" />
+            <button type="button" class="btn-outline" disabled={saving}
+                    onclick={() => save({ slack_webhook: webhookInput || null })}>Save</button>
           </div>
+          {#if config.slack_webhook}
+            <span class="text-[12px]" style="color:var(--accent)">Webhook active</span>
+          {/if}
         </div>
       </section>
 
       <!-- Data -->
-      <section>
-        <div class="eyebrow" style="margin-bottom:14px">Data</div>
-        <div style="display:flex;flex-direction:column;gap:12px">
-          <div>
-            <div style="font-size:12px;color:var(--ink-2);margin-bottom:8px">Retention period</div>
-            <div class="seg-control">
-              {#each RETAIN as d}
-                <button class="seg-btn {config.retention_days === d ? 'active' : ''}"
-                        onclick={() => save({ retention_days: d })}>{d}d</button>
-              {/each}
-            </div>
+      <section class="flex flex-col gap-3.5 border-b py-6" style="border-color:var(--line)">
+        <span class="eyebrow">Data</span>
+        <div class="flex flex-wrap items-center justify-between gap-3">
+          <span class="text-[14px]" style="color:var(--ink-2)">Retention period</span>
+          <div class="seg2" role="group" aria-label="Retention period">
+            {#each RETAIN as d}
+              <button type="button" aria-pressed={config.retention_days === d} onclick={() => save({ retention_days: d })}><span>{d}d</span></button>
+            {/each}
           </div>
-          <a href="/api/history/export?window=all" download="astral-history.csv"
-             style="font-size:12px;color:var(--accent);text-decoration:none;display:inline-flex;align-items:center;gap:4px">
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
-              <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/>
-              <polyline points="7 10 12 15 17 10"/>
-              <line x1="12" y1="15" x2="12" y2="3"/>
-            </svg>
-            Export CSV
-          </a>
         </div>
+        <a href="/api/history/export?window=all" download="astral-history.csv"
+           class="inline-flex min-h-11 items-center gap-2 text-[14px] font-medium no-underline" style="color:var(--accent)">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4" /><polyline points="7 10 12 15 17 10" /><line x1="12" y1="15" x2="12" y2="3" />
+          </svg>
+          Export history as CSV
+        </a>
       </section>
 
       <!-- Account -->
-      <section>
-        <div class="eyebrow" style="margin-bottom:14px">Account</div>
-        <div style="display:flex;flex-direction:column;gap:8px">
-          <button onclick={revokeAll} disabled={revoking}
-                  style="padding:9px 14px;border-radius:8px;border:1px solid rgba(244,63,94,0.3);background:var(--crit-soft);color:var(--crit);font-size:12px;font-weight:500;cursor:pointer;text-align:left;font-family:inherit;transition:opacity 0.15s"
-                  class:opacity-50={revoking}>
-            {revoking ? 'Revoking…' : 'Revoke all sessions'}
-          </button>
-          <button onclick={() => { onClose(); onLogout(); }}
-                  style="padding:9px 14px;border-radius:8px;border:1px solid rgba(244,63,94,0.2);background:transparent;color:var(--crit);font-size:12px;font-weight:500;cursor:pointer;text-align:left;font-family:inherit;opacity:0.85">
-            Sign out
-          </button>
-        </div>
+      <section class="flex flex-col gap-2.5 pt-6">
+        <span class="eyebrow">Account</span>
+        <button type="button" class="btn-danger" disabled={revoking} onclick={revokeAll}>
+          {revoking ? 'Revoking…' : 'Revoke all sessions'}
+        </button>
+        <button type="button" class="btn-outline justify-start" style="height:auto;min-height:44px;padding:0 16px"
+                onclick={() => { onClose(); onLogout(); }}>Sign out</button>
       </section>
     </div>
+  {/snippet}
 
-    <!-- Footer -->
-    <div style="padding:16px 24px;border-top:1px solid var(--line);display:flex;align-items:center;justify-content:space-between;flex-shrink:0">
-      <span class="font-mono" style="font-size:11px;color:var(--ink-4)">Astral v1.1.0</span>
-      <button onclick={onClose} class="btn btn-primary">Done</button>
+  {#snippet footer()}
+    <div class="flex items-center justify-between gap-3 px-6 py-3.5">
+      <span class="text-[12px]" style="color:var(--ink-3)">Changes save automatically</span>
+      <button type="button" class="h-11 cursor-pointer rounded-xl border-0 px-[26px] text-[14px] font-semibold"
+              style="background:var(--accent);color:#09090b;font-family:inherit" onclick={onClose}>Done</button>
     </div>
-  </div>
-{/if}
+  {/snippet}
+</Drawer>
