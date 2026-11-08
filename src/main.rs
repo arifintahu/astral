@@ -112,7 +112,9 @@ impl LoginLimiter {
     }
 }
 
-#[tokio::main]
+// Two workers are plenty for one SSE stream per viewer and a few API calls. The default is one
+// thread per core, which on a big server means dozens of idle threads and their stacks.
+#[tokio::main(worker_threads = 2)]
 async fn main() -> anyhow::Result<()> {
     tracing_subscriber::fmt::init();
     let args = Args::parse();
