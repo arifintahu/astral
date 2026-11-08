@@ -16,6 +16,13 @@ updates:
     groups:
       rust-minor-and-patch:
         update-types: [minor, patch]
+    ignore:
+      # sysinfo is what every CPU and memory number comes from. 0.40 measured worse with the process
+      # list on (+0.25 to +0.58 points of one core, about 0.2 MB more) and adds nothing Astral uses.
+      # Patch releases still arrive. To move up, measure first: ./benchmark.sh and the VPS method in
+      # the README.
+      - dependency-name: "sysinfo"
+        update-types: ["version-update:semver-minor"]
 
   - package-ecosystem: npm
     directory: /web
