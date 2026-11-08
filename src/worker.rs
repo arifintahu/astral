@@ -13,7 +13,9 @@ const ALERT_HISTORY_MAX: usize = 50;
 pub struct Worker {
     db: Db,
     metrics_rx: broadcast::Receiver<SystemMetrics>,
-    buffer: Vec<SystemMetrics>,
+    /// Samples of the current minute, each with the seconds it covers (see `push_sample`).
+    buffer: Vec<(f64, SystemMetrics)>,
+    last_sample_at: Option<Instant>,
     config: SharedConfig,
     webhook_url: Option<String>,
     alert_tx: broadcast::Sender<AlertEvent>,
@@ -35,6 +37,7 @@ impl Worker {
             db,
             metrics_rx,
             buffer: Vec::new(),
+            last_sample_at: None,
             config,
             webhook_url,
             alert_tx,
@@ -53,7 +56,7 @@ impl Worker {
         loop {
             tokio::select! {
                 Ok(metric) = self.metrics_rx.recv() => {
-                    self.buffer.push(metric);
+                    self.push_sample(metric);
                 }
                 _ = ticker_1m.tick() => {
                     if let Err(e) = self.process_1m().await {
@@ -84,35 +87,38 @@ impl Worker {
         }
     }
 
+    /// Samples are 1 s apart while a dashboard is open and further apart when not. Each is weighted by
+    /// the time since the previous one, so a short viewing session does not outweigh the quiet time
+    /// around it in the minute's average.
+    fn push_sample(&mut self, mut metric: SystemMetrics) {
+        let now = Instant::now();
+        let covered = self
+            .last_sample_at
+            .replace(now)
+            .map_or(1.0, |t| now.duration_since(t).as_secs_f64())
+            .clamp(0.01, 60.0);
+        // Only the averages are kept, so the process list would just sit in memory.
+        metric.processes = Vec::new();
+        self.buffer.push((covered, metric));
+    }
+
     async fn process_1m(&mut self) -> Result<()> {
         if self.buffer.is_empty() {
             return Ok(());
         }
 
-        let count = self.buffer.len() as f64;
-        let avg_cpu = self.buffer.iter().map(|m| m.cpu_usage as f64).sum::<f64>() / count;
-        let avg_mem = self
-            .buffer
-            .iter()
-            .map(|m| m.used_memory as f64)
-            .sum::<f64>()
-            / count;
-        let avg_tx = self.buffer.iter().map(|m| m.network_tx as f64).sum::<f64>() / count;
-        let avg_rx = self.buffer.iter().map(|m| m.network_rx as f64).sum::<f64>() / count;
-        let avg_disk_read = self
-            .buffer
-            .iter()
-            .map(|m| m.disks.iter().map(|d| d.read_bytes as f64).sum::<f64>())
-            .sum::<f64>()
-            / count;
-        let avg_disk_write = self
-            .buffer
-            .iter()
-            .map(|m| m.disks.iter().map(|d| d.written_bytes as f64).sum::<f64>())
-            .sum::<f64>()
-            / count;
+        let total_weight: f64 = self.buffer.iter().map(|(w, _)| w).sum();
+        let mean = |value: &dyn Fn(&SystemMetrics) -> f64| -> f64 {
+            self.buffer.iter().map(|(w, m)| w * value(m)).sum::<f64>() / total_weight
+        };
+        let avg_cpu = mean(&|m| m.cpu_usage as f64);
+        let avg_mem = mean(&|m| m.used_memory as f64);
+        let avg_tx = mean(&|m| m.network_tx as f64);
+        let avg_rx = mean(&|m| m.network_rx as f64);
+        let avg_disk_read = mean(&|m| m.disks.iter().map(|d| d.read_bytes as f64).sum());
+        let avg_disk_write = mean(&|m| m.disks.iter().map(|d| d.written_bytes as f64).sum());
 
-        let total_memory = self.buffer.last().map(|m| m.total_memory).unwrap_or(0);
+        let total_memory = self.buffer.last().map(|(_, m)| m.total_memory).unwrap_or(0);
         let timestamp = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs() as i64;
 
         let point = MetricPoint {

@@ -28,21 +28,32 @@ It serves a modern single-page web UI with real-time system health and historica
 -   **Secure by Default:** HMAC-SHA256 session tokens with per-login nonces, `HttpOnly; SameSite=Strict` cookies, Argon2 password hashing, login rate limiting, server-side session revocation, and a full set of security headers (CSP, HSTS, X-Frame-Options).
 -   **Alerting:** Configurable webhook alerts (HTTPS only) for high CPU or memory usage (sustained 5 minutes), with a 15-minute per-kind cooldown to prevent alert floods.
 -   **Settings without a restart:** Alert thresholds, process monitoring, retention and the Slack webhook can be changed from the dashboard.
--   **Lightweight:** Minimal resource footprint, designed for small to medium-sized VPS and servers.
+-   **Lightweight:** About 7 MB of memory and close to no CPU while idle, measured on a real 4-vCPU VPS (see [Resource use](#resource-use)). Designed for small to medium-sized VPS and servers.
 
 ## Why Astral
 
 `htop` shows you the moment you are looking; Prometheus and Grafana answer every question but ask you to run and maintain several services. Astral keeps one job: show what your server is doing now and over the last few days, and tell you when it stays hot. One file to copy, one port to open behind your reverse proxy, and nothing to configure beyond a login.
 
-## Benchmarks
+## Resource use
 
-Running `./benchmark.sh` on a standard development environment:
+Astral is meant to disappear on a small server, so these numbers come from a real one.
 
-| Metric | Value |
-| :--- | :--- |
-| **Binary Size** | 7.1M (7362848 bytes) |
-| **Execution Time** | 1.53ms (Time to Ready) |
-| **Peak Memory (RSS)** | 13.48 MB (`VmHWM`, idle after 10s warmup; ~17 MB after a login + SSE stream) |
+**Test environment:** a VPS with 4 vCPUs (AMD EPYC) and 7.9 GB RAM, running Ubuntu 24.04 and shared with other workloads. The Linux (amd64) release binary was started with a fresh database, left to warm up for 20 seconds, then measured over 60 seconds. Each figure is the median of three runs. CPU is the server's own CPU time as a share of one core, so other tenants do not count.
+
+| Scenario | CPU | Memory (RSS) |
+| :--- | :---: | :---: |
+| Idle, no browser open | 0.03% | 7.2 MB |
+| Idle, process list on | 0.27% | 7.6 MB |
+| One signed-in dashboard open, process list on | 2.27% | 7.7 MB |
+
+- **Spread across the three runs:** 0.03% to 0.08% idle, 0.15% to 0.48% idle with the process list on, and 2.2% to 2.7% with a dashboard open. With a dashboard open and the process list off (the default), CPU is about 0.4%.
+- **Threads:** 5.
+- **Peak memory** (`VmHWM`): 13.9 MB at startup, from the one-time 9 MiB Argon2 password hash. A signed-in dashboard peaks at 15.7 MB.
+- **What the 7 MB is:** about 1 MB of heap. The rest is the program's own code and the shared C library, clean pages that the kernel can drop under memory pressure.
+- **Binary:** 7.0 MB. **Time to ready:** about 0.25 to 0.3 s, almost all of it that startup hash.
+- **Bandwidth:** about 1.7 KB/s for each open dashboard.
+
+When nobody has the dashboard open, Astral samples every 10 seconds instead of every second, and history and alerts use time-weighted averages so they stay accurate. The process list is rescanned every 3 seconds, because reading every process is the most expensive thing Astral does. A dashboard that connects gets its first update within about a second. `./benchmark.sh` reproduces the idle row on your own machine.
 
 ## Install
 

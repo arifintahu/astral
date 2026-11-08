@@ -112,8 +112,30 @@ impl LoginLimiter {
     }
 }
 
-#[tokio::main]
+/// Keeps the 9 MiB Argon2 buffer from staying in memory after a login.
+///
+/// glibc normally serves big allocations with mmap and returns them on free. But after one such
+/// block is freed it raises its mmap threshold to that size, so the next 9 MiB buffer comes from
+/// the heap and stays resident. The startup password hash frees one, so the first login would
+/// leave about 9 MB behind for good. Pinning the threshold turns that adaptation off.
+#[cfg(all(target_os = "linux", target_env = "gnu"))]
+fn pin_malloc_mmap_threshold() {
+    // SAFETY: mallopt only sets an allocator tunable, and nothing else is allocating yet that
+    // depends on the old value.
+    unsafe {
+        libc::mallopt(libc::M_MMAP_THRESHOLD, 128 * 1024);
+    }
+}
+
+#[cfg(not(all(target_os = "linux", target_env = "gnu")))]
+fn pin_malloc_mmap_threshold() {}
+
+// Two workers are plenty for one SSE stream per viewer and a few API calls. The default is one
+// thread per core, which on a big server means dozens of idle threads and their stacks.
+#[tokio::main(worker_threads = 2)]
 async fn main() -> anyhow::Result<()> {
+    // Before the startup password hash below, which is what would otherwise move the threshold.
+    pin_malloc_mmap_threshold();
     tracing_subscriber::fmt::init();
     let args = Args::parse();
 
@@ -182,12 +204,17 @@ async fn main() -> anyhow::Result<()> {
     };
     let shared_config: SharedConfig = Arc::new(tokio::sync::RwLock::new(dyn_config));
 
-    let (tx, _rx) = broadcast::channel::<SystemMetrics>(100);
+    // No spare receiver is kept: the collector counts subscribers to tell whether a dashboard is open,
+    // and a receiver that never reads would pin every message in the buffer. Consumers read each
+    // second, so a short buffer is enough.
+    let (tx, _) = broadcast::channel::<SystemMetrics>(16);
+    let wake = Arc::new(tokio::sync::Notify::new());
 
     let tx_clone = tx.clone();
     let config_for_metrics = shared_config.clone();
+    let wake_for_collector = wake.clone();
     tokio::spawn(async move {
-        metrics::run_metrics_collector(tx_clone, config_for_metrics).await;
+        metrics::run_metrics_collector(tx_clone, config_for_metrics, wake_for_collector).await;
     });
 
     let alert_tx = api::create_alert_channel();
@@ -212,6 +239,7 @@ async fn main() -> anyhow::Result<()> {
         config: shared_config,
         alert_history,
         revoke_all_at,
+        wake,
     };
     let auth_config_clone = auth_config.clone();
 

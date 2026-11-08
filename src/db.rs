@@ -1,5 +1,8 @@
 use anyhow::Result;
-use sqlx::{FromRow, sqlite::SqlitePool};
+use sqlx::{
+    FromRow,
+    sqlite::{SqlitePool, SqlitePoolOptions},
+};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 const VALID_TABLES: &[&str] = &["metrics_1m", "metrics_5m", "metrics_15m", "metrics_1h"];
@@ -40,7 +43,11 @@ type AverageRow = (
 
 impl Db {
     pub async fn new(database_url: &str) -> Result<Self> {
-        let pool = SqlitePool::connect(database_url).await?;
+        // One writer (the worker) and a few history reads: the default pool of 10 only costs memory.
+        let pool = SqlitePoolOptions::new()
+            .max_connections(2)
+            .connect(database_url)
+            .await?;
         let db = Self { pool };
         db.init().await?;
         Ok(db)
