@@ -1,7 +1,9 @@
 use serde::Serialize;
-use sysinfo::{CpuRefreshKind, Disks, MemoryRefreshKind, Networks, ProcessesToUpdate, RefreshKind, System};
+use sysinfo::{
+    CpuRefreshKind, Disks, MemoryRefreshKind, Networks, ProcessesToUpdate, RefreshKind, System,
+};
 use tokio::sync::broadcast;
-use tokio::time::{interval, Duration};
+use tokio::time::{Duration, interval};
 
 use crate::config::SharedConfig;
 
@@ -60,7 +62,11 @@ impl MetricsCollector {
 
         system.refresh_all();
 
-        Self { system, networks, disks }
+        Self {
+            system,
+            networks,
+            disks,
+        }
     }
 
     pub fn collect(&mut self, enable_process_list: bool) -> SystemMetrics {
@@ -139,10 +145,7 @@ impl MetricsCollector {
     }
 }
 
-pub async fn run_metrics_collector(
-    tx: broadcast::Sender<SystemMetrics>,
-    config: SharedConfig,
-) {
+pub async fn run_metrics_collector(tx: broadcast::Sender<SystemMetrics>, config: SharedConfig) {
     let mut collector = MetricsCollector::new();
     let mut tick = interval(Duration::from_secs(1));
 

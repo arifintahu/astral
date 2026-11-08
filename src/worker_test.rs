@@ -68,7 +68,10 @@ async fn test_aggregate_and_store() {
 
     let worker = Worker::new(db.clone(), rx, 90.0, 90.0, None, alert_tx);
 
-    let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs() as i64;
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_secs() as i64;
 
     for i in 0..3 {
         let point = MetricPoint {
@@ -81,7 +84,10 @@ async fn test_aggregate_and_store() {
         db.insert_metric("metrics_1m", point).await.unwrap();
     }
 
-    worker.aggregate_and_store("metrics_1m", "metrics_5m", 5).await.unwrap();
+    worker
+        .aggregate_and_store("metrics_1m", "metrics_5m", 5)
+        .await
+        .unwrap();
 
     let history = db.get_history("metrics_5m", 0).await.unwrap();
     assert_eq!(history.len(), 1);

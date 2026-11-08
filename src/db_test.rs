@@ -32,15 +32,21 @@ async fn test_db_init_creates_tables() {
     let db = Db::new("sqlite::memory:").await.unwrap();
     // Inserting into all tables should work
     for table in &["metrics_1m", "metrics_5m", "metrics_15m", "metrics_1h"] {
-        db.insert_metric(table, make_point(1000, 50.0)).await.unwrap();
+        db.insert_metric(table, make_point(1000, 50.0))
+            .await
+            .unwrap();
     }
 }
 
 #[tokio::test]
 async fn test_insert_and_get_history() {
     let db = Db::new("sqlite::memory:").await.unwrap();
-    db.insert_metric("metrics_1m", make_point(1000, 50.0)).await.unwrap();
-    db.insert_metric("metrics_1m", make_point(1001, 60.0)).await.unwrap();
+    db.insert_metric("metrics_1m", make_point(1000, 50.0))
+        .await
+        .unwrap();
+    db.insert_metric("metrics_1m", make_point(1001, 60.0))
+        .await
+        .unwrap();
 
     let history = db.get_history("metrics_1m", 0).await.unwrap();
     assert_eq!(history.len(), 2);
@@ -52,9 +58,15 @@ async fn test_insert_and_get_history() {
 #[tokio::test]
 async fn test_get_history_respects_start_ts() {
     let db = Db::new("sqlite::memory:").await.unwrap();
-    db.insert_metric("metrics_1m", make_point(100, 10.0)).await.unwrap();
-    db.insert_metric("metrics_1m", make_point(200, 20.0)).await.unwrap();
-    db.insert_metric("metrics_1m", make_point(300, 30.0)).await.unwrap();
+    db.insert_metric("metrics_1m", make_point(100, 10.0))
+        .await
+        .unwrap();
+    db.insert_metric("metrics_1m", make_point(200, 20.0))
+        .await
+        .unwrap();
+    db.insert_metric("metrics_1m", make_point(300, 30.0))
+        .await
+        .unwrap();
 
     let history = db.get_history("metrics_1m", 200).await.unwrap();
     assert_eq!(history.len(), 2);
@@ -64,7 +76,11 @@ async fn test_get_history_respects_start_ts() {
 #[tokio::test]
 async fn test_insert_invalid_table_fails() {
     let db = Db::new("sqlite::memory:").await.unwrap();
-    assert!(db.insert_metric("hacked", make_point(1, 1.0)).await.is_err());
+    assert!(
+        db.insert_metric("hacked", make_point(1, 1.0))
+            .await
+            .is_err()
+    );
 }
 
 #[tokio::test]
@@ -77,7 +93,9 @@ async fn test_get_history_invalid_table_fails() {
 async fn test_cleanup_removes_old_data() {
     let db = Db::new("sqlite::memory:").await.unwrap();
     // Insert with timestamp = 1 (very old)
-    db.insert_metric("metrics_1m", make_point(1, 50.0)).await.unwrap();
+    db.insert_metric("metrics_1m", make_point(1, 50.0))
+        .await
+        .unwrap();
     // Cleanup with 1 second retention (cutoff = now - 1, which is >> 1)
     db.cleanup("metrics_1m", 1).await.unwrap();
     let history = db.get_history("metrics_1m", 0).await.unwrap();
@@ -87,9 +105,15 @@ async fn test_cleanup_removes_old_data() {
 #[tokio::test]
 async fn test_get_average() {
     let db = Db::new("sqlite::memory:").await.unwrap();
-    db.insert_metric("metrics_1m", make_point(100, 20.0)).await.unwrap();
-    db.insert_metric("metrics_1m", make_point(101, 40.0)).await.unwrap();
-    db.insert_metric("metrics_1m", make_point(102, 60.0)).await.unwrap();
+    db.insert_metric("metrics_1m", make_point(100, 20.0))
+        .await
+        .unwrap();
+    db.insert_metric("metrics_1m", make_point(101, 40.0))
+        .await
+        .unwrap();
+    db.insert_metric("metrics_1m", make_point(102, 60.0))
+        .await
+        .unwrap();
 
     let avg = db.get_average("metrics_1m", 0).await.unwrap().unwrap();
     assert!((avg.cpu_usage - 40.0).abs() < 0.1);
@@ -106,8 +130,12 @@ async fn test_get_average_empty() {
 #[tokio::test]
 async fn test_insert_or_replace_overwrites() {
     let db = Db::new("sqlite::memory:").await.unwrap();
-    db.insert_metric("metrics_1m", make_point(100, 20.0)).await.unwrap();
-    db.insert_metric("metrics_1m", make_point(100, 80.0)).await.unwrap();
+    db.insert_metric("metrics_1m", make_point(100, 20.0))
+        .await
+        .unwrap();
+    db.insert_metric("metrics_1m", make_point(100, 80.0))
+        .await
+        .unwrap();
 
     let history = db.get_history("metrics_1m", 0).await.unwrap();
     assert_eq!(history.len(), 1);
@@ -117,6 +145,9 @@ async fn test_insert_or_replace_overwrites() {
 #[tokio::test]
 async fn test_check_alert_condition_no_data() {
     let db = Db::new("sqlite::memory:").await.unwrap();
-    let result = db.check_alert_condition("metrics_1m", 90.0, 2048, 300).await.unwrap();
+    let result = db
+        .check_alert_condition("metrics_1m", 90.0, 2048, 300)
+        .await
+        .unwrap();
     assert!(!result);
 }

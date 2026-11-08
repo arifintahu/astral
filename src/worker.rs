@@ -91,7 +91,12 @@ impl Worker {
 
         let count = self.buffer.len() as f64;
         let avg_cpu = self.buffer.iter().map(|m| m.cpu_usage as f64).sum::<f64>() / count;
-        let avg_mem = self.buffer.iter().map(|m| m.used_memory as f64).sum::<f64>() / count;
+        let avg_mem = self
+            .buffer
+            .iter()
+            .map(|m| m.used_memory as f64)
+            .sum::<f64>()
+            / count;
         let avg_tx = self.buffer.iter().map(|m| m.network_tx as f64).sum::<f64>() / count;
         let avg_rx = self.buffer.iter().map(|m| m.network_rx as f64).sum::<f64>() / count;
         let avg_disk_read = self
@@ -127,8 +132,7 @@ impl Worker {
             let cfg = self.config.read().await;
             (cfg.alert_cpu, cfg.alert_ram)
         };
-        let threshold_mem_bytes =
-            (total_memory as f64 * alert_ram_threshold as f64 / 100.0) as i64;
+        let threshold_mem_bytes = (total_memory as f64 * alert_ram_threshold as f64 / 100.0) as i64;
 
         let alert_triggered = self
             .db
@@ -165,7 +169,10 @@ impl Worker {
         let start_ts = now - (limit_minutes * 60);
 
         if let Some(metric) = self.db.get_average(source_table, start_ts).await? {
-            let point = MetricPoint { timestamp: now, ..metric };
+            let point = MetricPoint {
+                timestamp: now,
+                ..metric
+            };
             self.db.insert_metric(target_table, point).await?;
         }
 
@@ -190,9 +197,9 @@ impl Worker {
             0.0
         };
 
-        let cpu_on_cooldown = self
-            .last_cpu_alert_at
-            .map_or(false, |t| now_inst.duration_since(t).as_secs() < ALERT_COOLDOWN_SECS);
+        let cpu_on_cooldown = self.last_cpu_alert_at.map_or(false, |t| {
+            now_inst.duration_since(t).as_secs() < ALERT_COOLDOWN_SECS
+        });
 
         if avg_cpu > alert_cpu_threshold as f64 && !cpu_on_cooldown {
             let alert = AlertEvent {
@@ -210,9 +217,9 @@ impl Worker {
             self.last_cpu_alert_at = Some(now_inst);
         }
 
-        let ram_on_cooldown = self
-            .last_ram_alert_at
-            .map_or(false, |t| now_inst.duration_since(t).as_secs() < ALERT_COOLDOWN_SECS);
+        let ram_on_cooldown = self.last_ram_alert_at.map_or(false, |t| {
+            now_inst.duration_since(t).as_secs() < ALERT_COOLDOWN_SECS
+        });
 
         if avg_mem > threshold_mem_bytes as f64 && !ram_on_cooldown {
             let alert = AlertEvent {
