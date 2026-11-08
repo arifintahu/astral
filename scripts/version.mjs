@@ -3,6 +3,8 @@
 //   node scripts/version.mjs check [vX.Y.Z]   fail if any file disagrees (or with the given tag)
 //   node scripts/version.mjs set X.Y.Z         write the version everywhere
 import { readFileSync, writeFileSync } from "node:fs";
+import { resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 
 const CARGO = "Cargo.toml";
 const CARGO_LOCK = "Cargo.lock";
@@ -17,6 +19,16 @@ const lockVersion = () =>
 const pkgVersion = () => JSON.parse(readFileSync(PACKAGE, "utf8")).version;
 const pkgLock = () => JSON.parse(readFileSync(PACKAGE_LOCK, "utf8"));
 
+/**
+ * The versions the files may have. A tag needs them to match exactly, except that a pre-release
+ * tag (v1.2.0-rc.1) is for trying the release workflow, so files at the version it is a candidate
+ * for (1.2.0) pass too and a candidate does not need a version commit of its own. Without a tag
+ * every file must equal the source version.
+ */
+export function acceptedVersions(want, isTag) {
+  return isTag && want.includes("-") ? [want, want.split("-")[0]] : [want];
+}
+
 function check(tag) {
   const lock = pkgLock();
   const found = {
@@ -27,7 +39,8 @@ function check(tag) {
     [`${PACKAGE_LOCK} (root package)`]: lock.packages?.[""]?.version,
   };
   const want = tag ? tag.replace(/^v/, "") : found[CARGO];
-  const bad = Object.entries(found).filter(([, v]) => v !== want);
+  const accepted = acceptedVersions(want, Boolean(tag));
+  const bad = Object.entries(found).filter(([, v]) => !accepted.includes(v));
   if (bad.length) {
     console.error(`Expected version ${want}, found:`);
     for (const [file, v] of bad) console.error(`  ${file}: ${v ?? "(none)"}`);
@@ -56,7 +69,9 @@ function set(version) {
   check();
 }
 
-const [cmd, arg] = process.argv.slice(2);
-if (cmd === "check") check(arg);
-else if (cmd === "set") set(arg);
-else { console.error("usage: version.mjs check [vX.Y.Z] | set X.Y.Z"); process.exit(1); }
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  const [cmd, arg] = process.argv.slice(2);
+  if (cmd === "check") check(arg);
+  else if (cmd === "set") set(arg);
+  else { console.error("usage: version.mjs check [vX.Y.Z] | set X.Y.Z"); process.exit(1); }
+}
