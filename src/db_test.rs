@@ -153,3 +153,74 @@ async fn test_check_alert_condition_no_data() {
         .unwrap();
     assert!(!result);
 }
+
+fn temp_db_path(tag: &str) -> std::path::PathBuf {
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    std::env::temp_dir().join(format!("astral-{tag}-{}-{nanos}.db", std::process::id()))
+}
+
+fn remove_db_files(path: &std::path::Path) {
+    for suffix in ["", "-wal", "-shm"] {
+        let mut name = path.as_os_str().to_owned();
+        name.push(suffix);
+        let _ = std::fs::remove_file(name);
+    }
+}
+
+#[tokio::test]
+async fn test_wal_file_stays_small() {
+    // One row a minute for days is thousands of tiny transactions. SQLite's defaults let the
+    // write-ahead log grow to about 4 MB and stay that size, 40 times the data on a small server.
+    let path = temp_db_path("wal");
+    let db = Db::new(&format!("sqlite:{}?mode=rwc", path.display()))
+        .await
+        .unwrap();
+    for i in 0..3000 {
+        db.insert_metric("metrics_1m", make_point(1000 + i, 50.0))
+            .await
+            .unwrap();
+    }
+
+    let wal = path.with_file_name(format!(
+        "{}-wal",
+        path.file_name().unwrap().to_string_lossy()
+    ));
+    let wal_bytes = std::fs::metadata(&wal).map(|m| m.len()).unwrap_or(0);
+    drop(db);
+    remove_db_files(&path);
+
+    assert!(
+        wal_bytes < 1_500_000,
+        "write-ahead log grew to {wal_bytes} bytes"
+    );
+}
+
+#[tokio::test]
+async fn test_wal_settings_apply_to_every_pooled_connection() {
+    // Pragmas such as journal_size_limit belong to a connection, and the pool opens two.
+    let path = temp_db_path("pragma");
+    let db = Db::new(&format!("sqlite:{}?mode=rwc", path.display()))
+        .await
+        .unwrap();
+
+    let mut first = db.pool.acquire().await.unwrap();
+    let mut second = db.pool.acquire().await.unwrap();
+    for conn in [&mut first, &mut second] {
+        let limit: i64 = sqlx::query_scalar("PRAGMA journal_size_limit")
+            .fetch_one(&mut **conn)
+            .await
+            .unwrap();
+        assert_eq!(limit, 1_048_576);
+        let mode: String = sqlx::query_scalar("PRAGMA journal_mode")
+            .fetch_one(&mut **conn)
+            .await
+            .unwrap();
+        assert_eq!(mode, "wal");
+    }
+    drop((first, second));
+    drop(db);
+    remove_db_files(&path);
+}

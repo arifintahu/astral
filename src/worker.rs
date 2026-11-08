@@ -67,21 +67,21 @@ impl Worker {
                     if let Err(e) = self.aggregate_and_store("metrics_1m", "metrics_5m", 5).await {
                         eprintln!("Error processing 5m metrics: {}", e);
                     }
-                    let _ = self.db.cleanup("metrics_1m", 3600 * 2).await;
+                    self.cleanup("metrics_1m", 3600 * 2).await;
                 }
                 _ = ticker_15m.tick() => {
                     if let Err(e) = self.aggregate_and_store("metrics_5m", "metrics_15m", 3).await {
                         eprintln!("Error processing 15m metrics: {}", e);
                     }
-                    let _ = self.db.cleanup("metrics_5m", 86400 * 2).await;
+                    self.cleanup("metrics_5m", 86400 * 2).await;
                 }
                 _ = ticker_1h.tick() => {
                     if let Err(e) = self.aggregate_and_store("metrics_15m", "metrics_1h", 4).await {
                         eprintln!("Error processing 1h metrics: {}", e);
                     }
-                    let _ = self.db.cleanup("metrics_15m", 86400 * 7).await;
+                    self.cleanup("metrics_15m", 86400 * 7).await;
                     let retention_days = self.config.read().await.retention_days;
-                    let _ = self.db.cleanup("metrics_1h", 86400 * retention_days as i64).await;
+                    self.cleanup("metrics_1h", 86400 * retention_days as i64).await;
                 }
             }
         }
@@ -100,6 +100,14 @@ impl Worker {
         // Only the averages are kept, so the process list would just sit in memory.
         metric.processes = Vec::new();
         self.buffer.push((covered, metric));
+    }
+
+    /// Retention: drop rows older than `retention_seconds`. A failure is logged, not fatal, so a
+    /// locked or full database shows up in the logs instead of the table quietly growing.
+    async fn cleanup(&self, table: &str, retention_seconds: i64) {
+        if let Err(e) = self.db.cleanup(table, retention_seconds).await {
+            tracing::warn!("Retention cleanup of {table} failed: {e:#}");
+        }
     }
 
     async fn process_1m(&mut self) -> Result<()> {

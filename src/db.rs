@@ -1,8 +1,9 @@
 use anyhow::Result;
 use sqlx::{
     FromRow,
-    sqlite::{SqlitePool, SqlitePoolOptions},
+    sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePool, SqlitePoolOptions},
 };
+use std::str::FromStr;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 const VALID_TABLES: &[&str] = &["metrics_1m", "metrics_5m", "metrics_15m", "metrics_1h"];
@@ -44,9 +45,16 @@ type AverageRow = (
 impl Db {
     pub async fn new(database_url: &str) -> Result<Self> {
         // One writer (the worker) and a few history reads: the default pool of 10 only costs memory.
+        let options = SqliteConnectOptions::from_str(database_url)?
+            .journal_mode(SqliteJournalMode::Wal)
+            // These belong to a connection, so they are set here and not once in init(). SQLite
+            // lets the write-ahead log reach 1000 pages (about 4 MB) and keeps the file that size,
+            // 40 times the data on a small server: checkpoint sooner and truncate what is left.
+            .pragma("wal_autocheckpoint", "200")
+            .pragma("journal_size_limit", "1048576");
         let pool = SqlitePoolOptions::new()
             .max_connections(2)
-            .connect(database_url)
+            .connect_with(options)
             .await?;
         let db = Self { pool };
         db.init().await?;
@@ -54,10 +62,6 @@ impl Db {
     }
 
     async fn init(&self) -> Result<()> {
-        sqlx::query("PRAGMA journal_mode=WAL")
-            .execute(&self.pool)
-            .await?;
-
         let tables = ["metrics_1m", "metrics_5m", "metrics_15m", "metrics_1h"];
         for table in tables {
             let table = validate_table(table)?;
