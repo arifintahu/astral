@@ -60,6 +60,9 @@ Raw 1s samples → buffer averaged every 1m → `metrics_1m` → aggregated to `
 - User-facing changes get a line under `[Unreleased]` in `CHANGELOG.md`; a release needs a `### Highlights` list. See `CONTRIBUTING.md`.
 
 ### Key Design Decisions
+- Sampling: the collector looks every 1 s while a dashboard is connected (`tx.receiver_count() > 1`; the worker is always one receiver) and every 10 s otherwise. A new SSE connection pokes it (`AppState.wake`). Network and disk values are per-second rates (counter delta / elapsed), and the worker weights samples by the time they cover.
+- Never keep a spare receiver of the metrics channel (`let (tx, _rx)` would): it counts as a viewer and pins buffered samples in memory.
+- `main()` pins glibc's mmap threshold (`libc::mallopt`, Linux/glibc only) so the 9 MiB Argon2 buffer is returned after each login.
 - Rust edition 2024
 - No ORM migrations — tables created programmatically in `db.rs::init()`
 - Auth is a closure-based Axum middleware, not tower-http's built-in
@@ -67,6 +70,8 @@ Raw 1s samples → buffer averaged every 1m → `metrics_1m` → aggregated to `
 - Database file: `astral.db` in the working directory
 
 ## Rules of Thumb
+
+- **Resource claims need measurements.** The numbers in the README come from `./benchmark.sh` and from runs on a real VPS. Re-measure before changing them, and change the method text with them.
 
 - **Build order is mandatory**: Run `cd web && npm run build` before `cargo build`. The Rust binary embeds `web/dist/` via `rust-embed` — a missing or stale `web/dist/` produces a binary that silently serves wrong assets with no compile error.
 - **TypeScript mirrors Rust structs**: Any field added/removed/renamed in a struct serialised over SSE or the history API must be mirrored in `web/src/lib/types.ts` immediately. Field names must match exactly — the frontend deserialises raw JSON with no schema validation.

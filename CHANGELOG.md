@@ -6,12 +6,18 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 
 ### Changed
 
+- **Far lower CPU use:** the collector no longer rescans every process every second, and samples every 10 seconds while no dashboard is open (every second while one is). Measured on a 4-vCPU VPS against 1.1.1: idle 5.88% to 0.03% of one core, idle with the process list on 10.87% to 0.23%, one dashboard open with the process list on 12.80% to 3.77%. A dashboard that connects still gets its first update within about a second.
+- **Fewer threads and connections:** two async workers and at most two SQLite connections, so 5 threads instead of 7 to 9.
+- **Network and disk rates are per second:** they are computed from the time since the previous sample, so the sample interval no longer changes what the dashboard shows. History averages are weighted by the time each sample covers.
+- **Keep-alive comments** on the live stream are sent every 15 seconds instead of every second.
 - **New "volt" design:** a lime accent on near-black. A status headline ("All systems nominal." or "CPU is running hot.") sits above four metric tiles (CPU, Memory, Network, Disk) that are also the tabs of one hero chart. The chart starts on a live 60-second stream and switches to 6H / 24H / 7D / All. Below it are the top processes and a details panel with load average, swap and mounts. Login, Settings, alert history, alert toasts and a sign-out confirmation are restyled. (#13)
 - **The headline follows your alert thresholds:** "running warm" and "running hot" use the CPU and memory limits from Settings instead of a fixed 70% / 90%. (#13)
 - **Tab icon and install icon** match the new logo. (#13)
 
 ### Fixed
 
+- **One login held about 9 MB for good:** on Linux, glibc kept the 9 MiB password-hash buffer in memory after the first login. A signed-in dashboard now uses 7.7 MB instead of 18.1 MB.
+- **A spare receiver pinned old samples:** the live metrics channel kept an unused receiver that held 100 samples in memory and made the collector think someone was always watching. It is gone and the buffer is 16 slots.
 - **Login animation loop:** the signal trace no longer snaps back at the end of each loop. (#13)
 - **Windows load average:** it is hidden on Windows, where the system reports no load average and the dashboard used to show 0.00. (#13)
 - **Disk tile and mounts agree:** the tile and headline use the root (or system) mount, and the mounts panel lists it first. The disk headline no longer mentions an alert threshold, because there is no disk alert. (#13)
