@@ -17,6 +17,8 @@ All notable changes are listed here. The format follows [Keep a Changelog](https
 
 ### Fixed
 
+- **The database log no longer sits at 4 MB:** the SQLite write-ahead log was left at about 4 MB (2.9 MB on a real server whose database was 90 KB). It now checkpoints sooner and is truncated to at most 1 MB; in a test of 3,000 writes it ended at 0.8 MB instead of 4.1 MB.
+- **Failed retention cleanups are logged:** a locked or full database used to fail the cleanup silently, so a table could keep growing unnoticed. The failure now shows up as a warning.
 - **One login held about 9 MB for good:** on Linux, glibc kept the 9 MiB password-hash buffer in memory after the first login. A signed-in dashboard now uses 7.7 MB instead of 18.1 MB.
 - **A spare receiver pinned old samples:** the live metrics channel kept an unused receiver that held 100 samples in memory and made the collector think someone was always watching. It is gone and the buffer is 16 slots.
 - **Login animation loop:** the signal trace no longer snaps back at the end of each loop. (#13)
